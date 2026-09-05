@@ -229,6 +229,11 @@ def _bridge_dlc_check_get_list(bridge, app_id):
                     return _mk().get_single_app_info(base_id, quick=True)
                 _ex = ThreadPoolExecutor(max_workers=1)
                 try:
+                    # listofdlc changes when new DLC ships; the persistent
+                    # cache serves app info stale-forever, so force a
+                    # refetch of the parent before reading its DLC list.
+                    from sff.network.steam_client import invalidate_app_info
+                    invalidate_app_info(base_id)
                     _fut = _ex.submit(_fetch_base_info)
                     try:
                         base_info = _fut.result(timeout=45)

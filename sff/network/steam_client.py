@@ -106,6 +106,20 @@ def create_provider_for_current_thread():
     return _run_on_cm_thread(_make_session, timeout=30)
 
 
+def invalidate_app_info(app_id):
+    """Drop cached app info so the next lookup refetches.
+
+    The persistent cache serves app info stale-forever by design (fast
+    UI reads), but fields like extended.listofdlc change when new DLC
+    ships. Callers that must see fresh data invalidate first; the
+    refetch goes through the SteamCMD HTTP mirror, so it's cheap.
+    """
+    from sff.core.cache import get_cache
+    get_cache().invalidate(f"app_info_{int(app_id)}")
+    if _SESSION_PROVIDER is not None:
+        _SESSION_PROVIDER._cache.pop(int(app_id), None)
+
+
 @dataclass
 class _ProductInfoResult:
     info: ProductInfo

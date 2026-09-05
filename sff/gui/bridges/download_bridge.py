@@ -666,6 +666,10 @@ def _bridge_download_dlc_oureveryday(bridge, dlc_appid, parent_appid):
             parent_info = None
             _ex = ThreadPoolExecutor(max_workers=1)
             try:
+                # Fresh parent app info: the depot->dlcappid map gains
+                # entries when new DLC ships and the cache is stale-forever.
+                from sff.network.steam_client import invalidate_app_info
+                invalidate_app_info(parent_appid)
                 _fut = _ex.submit(_fetch_parent_info)
                 parent_info = _fut.result(timeout=45)
             except _FT:
@@ -1890,7 +1894,7 @@ def _bridge_download_game_ddmod(bridge, app_id, source, lua_path, manifest_folde
             _n_dep = len(selected_depots)
             bridge.download_progress.emit(json.dumps({
                 "app_id": app_id, "name": game_name or f"App {app_id}",
-                "status": f"Starting download ({_n_dep} depot{'s' if _n_dep != 1 else ''})...",
+                "status": f"Starting download ({_n_dep} depot{'s' if _n_dep != 1 else ''})... this can take a while",
                 "progress": 35,
             }))
 
@@ -1913,6 +1917,22 @@ def _bridge_download_game_ddmod(bridge, app_id, source, lua_path, manifest_folde
             _DDMOD_FLOOR = 35.0
             _DDMOD_CEIL = 100.0
             _last_pct = [-1.0]
+
+            # Each depot gets an equal slice of the 35-100 range so the bar
+            # climbs monotonically across all depots instead of hitting 100%
+            # at the end of every one and snapping back for the next.
+            # Reads selected_depots lazily: the OS filter reassigns it after
+            # this closure is defined but before run_download emits anything.
+            _span = _DDMOD_CEIL - _DDMOD_FLOOR
+
+            def _map_progress(depot_id, raw_pct):
+                order = [str(d) for d in selected_depots]
+                n = max(len(order), 1)
+                try:
+                    idx = order.index(str(depot_id))
+                except ValueError:
+                    idx = 0
+                return _DDMOD_FLOOR + (idx / n) * _span + (raw_pct / 100.0) * (_span / n)
 
             # Human label per depot id. App info rarely carries a depot
             # "name", but oslist/osarch are already in the cached app info,
@@ -2012,7 +2032,7 @@ def _bridge_download_game_ddmod(bridge, app_id, source, lua_path, manifest_folde
                     done_b = int(prog_match.group(2))
                     total_b = int(prog_match.group(3))
                     speed = int(prog_match.group(4))
-                    mapped = _DDMOD_FLOOR + (raw / 100.0) * (_DDMOD_CEIL - _DDMOD_FLOOR)
+                    mapped = _map_progress(_cur_depot[0], raw)
                     mapped_int = int(mapped)
                     if mapped_int != int(_last_pct[0]):
                         _last_pct[0] = mapped
@@ -2037,7 +2057,7 @@ def _bridge_download_game_ddmod(bridge, app_id, source, lua_path, manifest_folde
                     raw = float(pct_file.group(1))
                     total_b = _depot_sizes.get(str(_cur_depot[0]), 0) if _cur_depot[0] else 0
                     done_b = int(raw / 100.0 * total_b) if total_b else 0
-                    mapped = _DDMOD_FLOOR + (raw / 100.0) * (_DDMOD_CEIL - _DDMOD_FLOOR)
+                    mapped = _map_progress(_cur_depot[0], raw)
                     mapped_int = int(mapped)
                     if mapped_int != int(_last_pct[0]):
                         _last_pct[0] = mapped
@@ -2049,7 +2069,7 @@ def _bridge_download_game_ddmod(bridge, app_id, source, lua_path, manifest_folde
                                 f" ({_fmt_bytes(speed)}/s)"
                             )
                         else:
-                            status = f"Downloading {_lbl}... {raw:.1f}%"
+                            status = f"Downloading {_lbl}... ({raw:.1f}%)"
                         try:
                             bridge.download_progress.emit(json.dumps({
                                 "app_id": app_id,
@@ -2068,7 +2088,7 @@ def _bridge_download_game_ddmod(bridge, app_id, source, lua_path, manifest_folde
                     except ValueError:
                         raw = -1.0
                     if 0.0 <= raw <= 100.0:
-                        mapped = _DDMOD_FLOOR + (raw / 100.0) * (_DDMOD_CEIL - _DDMOD_FLOOR)
+                        mapped = _map_progress(_cur_depot[0], raw)
                         mapped_int = int(mapped)
                         if mapped_int != int(_last_pct[0]):
                             _last_pct[0] = mapped
@@ -2077,7 +2097,7 @@ def _bridge_download_game_ddmod(bridge, app_id, source, lua_path, manifest_folde
                                 bridge.download_progress.emit(json.dumps({
                                     "app_id": app_id,
                                     "name": game_name or f"App {app_id}",
-                                    "status": f"Downloading {_lbl}... {raw:.1f}%",
+                                    "status": f"Downloading {_lbl}... ({raw:.1f}%)",
                                     "progress": mapped_int,
                                 }))
                             except Exception:
