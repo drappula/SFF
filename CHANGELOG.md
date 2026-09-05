@@ -9,7 +9,10 @@
 - **"Local file" source** - imported manifests without downloading the game; now falls through to the DDMod download as it did before v6.6.5.
 - **Proton-only games** - titles with no Linux depot (e.g. The Binding of Isaac) now download the Windows depots with the Windows file filter and launch through Proton, instead of installing only shared content.
 - **DRM badges** - a games.json refresh stripped the DRM data (upstream changed to a sparse format), making the badge show on nearly every game. Refreshes now field-merge and preserve the rich data.
-- **Downloads tab** - the row appears the moment a download starts; progress shows downloaded/total MB with speed and the depot name instead of freezing at 35%; completed downloads leave the Active section; "Clear finished" clears the history.
+- **Downloads tab** - the row appears the moment a download starts; progress shows downloaded/total MB with speed and the depot name instead of freezing at 35%; the bar climbs steadily across all depots instead of snapping back between them; completed downloads leave the Active section; "Clear finished" clears the history.
+- **Lua app-id parsing** - games whose Lua lists depots before the base app (e.g. Katana ZERO) resolved to a depot ID, registering under the wrong appid and showing as "App ..." instead of the real name. The base game is now taken from the keyless `addappid` entry.
+- **DLC check lists** - newly shipped DLCs (e.g. Elden Ring Tarnished Pack) were missing because cached app info never refreshed; the parent app is now refetched before building the DLC list.
+- **Hubcap errors** - outages and connection problems were reported as "API key rejected"; the message now distinguishes a rejected key from a dead or unreachable server.
 - **Misc UI** - duplicate Lure Fix/Update toasts, duplicate tray quit entries, Remove Game dialog text overflow, provider status lines dimmed to secondary styling.
 - **Linux audit** - launch options/Online Fix edits were silently overwritten by Steam (process name check); cloud save detection scanned the CWD instead of XDG dirs.
 
