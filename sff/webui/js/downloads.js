@@ -97,7 +97,9 @@ window.Downloads = (function() {
     }
 
     function _completeDownload(data) {
-        var id = data.task || data.app_id || 'unknown';
+        // app_id first: task_finished carries task='download_ddmod', which
+        // would otherwise create a second row and leave the real one active.
+        var id = data.app_id || data.task || 'unknown';
         if (_downloads[id]) {
             _downloads[id].active = false;
             _downloads[id].status = data.success ? 'Completed' : 'Failed';

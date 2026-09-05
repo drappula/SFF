@@ -75,6 +75,9 @@ window.App = (function() {
         _initGlobalListeners();
         _initDepotEdit();
         if (window.DlcCheck) DlcCheck.init();
+        // Attach download_progress listener at startup, not on first tab
+        // visit, so a download started from the Store shows up immediately.
+        if (window.Downloads) Downloads.init();
         window.addEventListener('live-log-limit-changed', function(ev) {
             _setLiveLogMaxLines(ev.detail);
         });
@@ -187,6 +190,11 @@ window.App = (function() {
                     }
                     if (result.task === 'provider_update' && result.background) {
                         _updateHomeProviderStatus(result);
+                        return;
+                    }
+                    // Tasks with dedicated page handlers (library.js) toast
+                    // themselves; the generic toast here would duplicate it.
+                    if (result.task === 'lure_fix' || result.task === 'update_check') {
                         return;
                     }
                     if (result.message) {
@@ -1643,6 +1651,7 @@ window.App = (function() {
         if (destInp) destInp.value = '';
         var firstRadio = document.querySelector('input[name="ddmod-home-source"][value="oureveryday"]');
         if (firstRadio) firstRadio.checked = true;
+        Components.populateDepotOsOptions('ddmod-home-target-os', appId);
 
         Bridge.callSync('get_recent_lua_files', function(json) {
             var files;

@@ -807,6 +807,19 @@ def _fetch_steam_platforms(app_ids):
     return out
 
 
+def _bridge_get_game_platforms(bridge, app_id):
+    """JSON list of lowercase OS tags for one appid ("windows", "macos",
+    "linux"). Empty list when Steam has no platform data, so the UI keeps
+    every option instead of guessing."""
+    try:
+        aid = int(app_id)
+    except (TypeError, ValueError):
+        return "[]"
+    meta = _fetch_steam_platforms([aid]).get(aid) or {}
+    tags = meta.get("platforms") or set()
+    return json.dumps(sorted(t for t in tags if t != "_unknown"))
+
+
 def _fetch_steam_image_urls(app_ids):
     """Batch-fetch canonical image URLs via Steam IStoreBrowseService/GetItems/v1.
 

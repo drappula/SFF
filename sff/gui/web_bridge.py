@@ -191,6 +191,7 @@ from sff.gui.bridges.misc_bridge import (
 )
 from sff.gui.bridges.store_bridge import (
     _bridge_connect_store,
+    _bridge_get_game_platforms,
     _bridge_refresh_store_metadata,
     _bridge_search_games,
     _bridge_search_games_file,
@@ -850,6 +851,9 @@ class WebBridge(QObject):
     @pyqtSlot(str, int, int, str, str, str)
     def search_games(self, query, offset, per_page, sort_by='updated', tag='', request_id=''):
         return _bridge_search_games(self, query, offset, per_page, sort_by, tag, request_id)
+    @pyqtSlot(str, result=str)
+    def get_game_platforms(self, app_id):
+        return _bridge_get_game_platforms(self, app_id)
     @pyqtSlot(str, bool)
     def fetch_depot_history(self, app_id, force_refresh):
         return _bridge_fetch_depot_history(self, app_id, force_refresh)

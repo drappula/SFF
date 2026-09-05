@@ -2577,6 +2577,9 @@ def _bridge_delete_game(bridge, app_id, game_path, mode):
         app_id_int = int(app_id) if str(app_id).isdigit() else None
         if app_id_int is None:
             return (False, "Invalid App ID")
+        # The post-delete library refresh reads get_installed_games, which
+        # serves a 1h cache; without this the removed game stays listed.
+        bridge._installed_games_cache = None
 
         # Lua deletion is the primary remove step in both modes. When
         # LumaCore is loaded, its DirWatch fires on the .lua delete

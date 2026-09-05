@@ -24,6 +24,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+import yaml
 from colorama import Fore, Style
 
 # Guard: this entire module is Linux-only. All public functions return early on non-Linux.

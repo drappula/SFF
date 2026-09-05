@@ -301,6 +301,7 @@ window.Components = (function() {
         if (ryuuOpt) ryuuOpt.style.display = 'none';
         var localRow = document.getElementById('dl-local-row');
         if (localRow) localRow.style.display = 'none';
+        _populateDepotOsOptions('dl-target-os', appId);
         Bridge.callWithCallback('get_game_branches', appId, function(json) {
             _populateRyuuBranches(json);
         });
@@ -531,6 +532,48 @@ window.Components = (function() {
         this._ui.classList.remove('open');
     };
 
+    // Rebuild a Depot OS select with only the OSes Steam reports for the
+    // game. Unknown platforms keep every option so we never hide a real one.
+    function _populateDepotOsOptions(selectId, appId) {
+        var sel = document.getElementById(selectId);
+        if (!sel) return;
+        if (!sel._allOptions) {
+            sel._allOptions = Array.prototype.map.call(sel.options, function(o) {
+                return { v: o.value, t: o.textContent };
+            });
+        }
+        var allOs = sel._allOptions.map(function(o) { return o.v; })
+            .filter(function(v) { return v && v !== 'auto' && v !== 'all'; });
+        Bridge.callWithCallback('get_game_platforms', appId || '', function(json) {
+            var plats;
+            try { plats = JSON.parse(json || '[]'); } catch (e) { plats = []; }
+            if (!plats.length) plats = allOs;
+            var wanted = {};
+            plats.forEach(function(p) { wanted[p] = true; });
+            var prev = sel.value;
+            sel.innerHTML = '';
+            if (plats.length === 1) {
+                // Single OS available — no point offering Auto or All depots
+                var only = sel._allOptions.filter(function(o) { return o.v === plats[0]; })[0];
+                var opt = document.createElement('option');
+                opt.value = only.v;
+                opt.textContent = only.t;
+                sel.appendChild(opt);
+            } else {
+                sel._allOptions.forEach(function(o) {
+                    if (o.v && o.v !== 'auto' && o.v !== 'all' && !wanted[o.v]) return;
+                    var opt = document.createElement('option');
+                    opt.value = o.v;
+                    opt.textContent = o.t;
+                    sel.appendChild(opt);
+                });
+            }
+            sel.value = prev;
+            if (!sel.value) sel.value = sel.options[0].value;
+            sel.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+    }
+
     function setHideImages(val) {
         _hideImages = !!val;
     }
@@ -578,6 +621,7 @@ window.Components = (function() {
         escapeHtml: escapeHtml,
         initModals: initModals,
         CustomSelect: CustomSelect,
+        populateDepotOsOptions: _populateDepotOsOptions,
         setHideImages: setHideImages,
         _populateRyuuBranches: _populateRyuuBranches
     };

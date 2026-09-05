@@ -491,6 +491,7 @@ def download_depot(
 
     pending = [(s, o, c, p) for s, o, c, p in all_flat if s not in verified_sha]
     skipped = len(verified_sha)
+    pending_bytes = sum(c for _, _, c, _ in pending)
     if skipped:
         print_fn(f"[native] {skipped}/{total_chunks} chunks already on disk (skipping)")
 
@@ -600,6 +601,8 @@ def download_depot(
             futures[fut] = sha
 
         total = len(pending)
+        _dl_start = time.monotonic()
+        _last_prog_t = 0.0
         for fut in concurrent.futures.as_completed(futures):
             sha = futures[fut]
             try:
@@ -623,6 +626,15 @@ def download_depot(
             if total_done[0] % 100 == 0 or total_done[0] == total:
                 pct = (total_done[0] / total) * 100
                 print_fn(f"\r[native] {total_done[0]}/{total} chunks ({pct:.0f}%) | {skipped} cached | {total_bytes[0]:,} B")
+                # Structured line for the UI progress scraper: percent,
+                # bytes done/total, speed. Throttled to ~2/sec.
+                _now = time.monotonic()
+                if _now - _last_prog_t >= 0.5 or total_done[0] == total:
+                    _last_prog_t = _now
+                    _speed = total_bytes[0] / max(_now - _dl_start, 0.001)
+                    print_fn(
+                        f"[PROG] {pct:.1f}% | {total_bytes[0]}/{pending_bytes} bytes | {_speed:.0f} B/s"
+                    )
 
     http_client.close()
     client.disconnect()

@@ -435,12 +435,10 @@ def main():
         app._taskbar_filter = _taskbar_filter
     tray.show_requested.connect(window.showNormal)
     tray.show_requested.connect(window.activateWindow)
-    tray.exit_requested.connect(app.quit)
-    tray.exit_requested.connect(window.force_quit)
 
-    # A13: explicit "Quit SteaMidra" entry on the tray context menu,
-    # alongside the existing Exit. Always full-quits regardless of
-    # CLOSE_TO_TRAY. Exit stays as-is (no rename, no rewire).
+    # A13: "Quit SteaMidra" entry on the tray context menu. Always
+    # full-quits regardless of CLOSE_TO_TRAY. (The old duplicate "Exit"
+    # entry and its exit_requested wiring were removed.)
     from PyQt6.QtGui import QAction as _QAction
 
     def _on_tray_quit_steamidra():

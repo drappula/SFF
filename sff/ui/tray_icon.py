@@ -44,7 +44,7 @@ from typing import Optional
 
 from PyQt6.QtWidgets import QSystemTrayIcon, QMenu, QApplication
 from PyQt6.QtGui import QIcon, QAction
-from PyQt6.QtCore import pyqtSignal, QObject, QTimer, Qt
+from PyQt6.QtCore import pyqtSignal, QObject, QTimer
 
 logger = logging.getLogger(__name__)
 
@@ -65,11 +65,9 @@ class TrayIcon(QObject):
 
     Signals:
         show_requested: user clicked "Show" or activated the icon
-        exit_requested: user clicked "Exit"
     """
 
     show_requested = pyqtSignal()
-    exit_requested = pyqtSignal()
 
     def __init__(self, parent=None, icon_path=""):
         # Parent to QApplication if no explicit parent so the tray
@@ -194,14 +192,8 @@ class TrayIcon(QObject):
 
         self._menu.addSeparator()
 
-        exit_action = QAction("Exit", self._menu)
-        # DirectConnection so Exit fires immediately on the GUI thread
-        # without queueing — same pattern antimicrox uses to avoid the
-        # menu staying open while the window is already tearing down.
-        exit_action.triggered.connect(
-            self.exit_requested.emit, Qt.ConnectionType.DirectConnection
-        )
-        self._menu.addAction(exit_action)
+        # "Quit SteaMidra" is appended by Main_gui.py right after this menu
+        # is built; the old duplicate "Exit" entry was removed.
 
         self._tray.setContextMenu(self._menu)
 
