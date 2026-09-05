@@ -1,3 +1,23 @@
+## 6.6.7
+
+### Fixed
+
+* Fixed Linux DDMod downloads hanging for minutes on a flaky CDN, writing game files without execute permission, and showing games at 0B in Steam after a failed install.
+* Fixed the download flow never actually closing Steam on Linux (it looked for the Windows process name), which left depot key writes locked.
+* Fixed the "Local file" download source importing manifests without downloading the game.
+* Proton-only games (no Linux depot, e.g. The Binding of Isaac) now download the Windows depots with the Windows file filter, so they launch through Proton instead of installing an empty folder.
+* Fixed the DRM badge showing on nearly every Store game after a games.json refresh stripped the DRM data.
+* Fixed the Downloads tab: the row now appears the moment a download starts, progress shows downloaded/total MB with speed and the depot name instead of freezing at 35%, completed downloads leave the Active section, and "Clear finished" actually clears the history.
+* Fixed Lure Fix and Update showing duplicate toasts, the tray menu having two quit entries, and the Remove Game dialog descriptions overflowing their buttons.
+* Fixed launch options and Online Fix edits being silently overwritten by Steam on Linux.
+* Fixed cloud save detection scanning the wrong folders on Linux.
+
+### Improved
+
+* Linux builds are about 104 MB smaller; Windows-only tools are no longer bundled.
+* Steam closes faster at the start of a download. Note: Steam stays closed when the download finishes, so restart it (the "Restart Steam" button injects SLSsteam) to see the new game as owned.
+* The release workflow no longer requires Google Drive credentials.
+
 ## 6.6.6
 
 ### New

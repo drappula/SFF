@@ -1,5 +1,24 @@
 # Changelog
 
+## 6.6.7
+
+### Fixed
+
+- **Linux DDMod downloads** - fixed multi-minute hangs on a flaky CDN (manifest resolution and the CDN client are now skipped when manifests are already on disk), missing execute permissions on downloaded game files, and games stuck at 0B in Steam after a failed install.
+- **Linux Steam kill** - the download flow looked for `steam.exe` (Windows name) and never actually closed Steam, leaving config.vdf locked. Now uses the Linux helper and polls until Steam is gone.
+- **"Local file" source** - imported manifests without downloading the game; now falls through to the DDMod download as it did before v6.6.5.
+- **Proton-only games** - titles with no Linux depot (e.g. The Binding of Isaac) now download the Windows depots with the Windows file filter and launch through Proton, instead of installing only shared content.
+- **DRM badges** - a games.json refresh stripped the DRM data (upstream changed to a sparse format), making the badge show on nearly every game. Refreshes now field-merge and preserve the rich data.
+- **Downloads tab** - the row appears the moment a download starts; progress shows downloaded/total MB with speed and the depot name instead of freezing at 35%; completed downloads leave the Active section; "Clear finished" clears the history.
+- **Misc UI** - duplicate Lure Fix/Update toasts, duplicate tray quit entries, Remove Game dialog text overflow, provider status lines dimmed to secondary styling.
+- **Linux audit** - launch options/Online Fix edits were silently overwritten by Steam (process name check); cloud save detection scanned the CWD instead of XDG dirs.
+
+### Improved
+
+- Linux builds are ~104 MB smaller (Windows-only `rclone` and `gbe_fork_tools` no longer bundled).
+- Steam closes faster at the start of a download and stays closed when it finishes; use "Restart Steam" to bring it back with SLSsteam injected.
+- Release workflow no longer requires Google Drive credentials.
+
 ## 6.6.6
 
 ### New
