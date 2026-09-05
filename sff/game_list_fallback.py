@@ -215,6 +215,35 @@ def _load_cached_games_json() -> bool:
     return False
 
 
+def _merge_preserving_rich(new: dict) -> dict:
+    """Overlay fetched entries on top of the richest previous data we have.
+
+    The upstream games.json format changed to a sparse 4-field list that
+    drops drm/tags/nsfw/dlc/header_image. Without this merge a refresh
+    silently strips those fields and the Store's DRM badges go blank.
+    """
+    def _overlay(target: dict, source: dict) -> None:
+        for appid, entry in source.items():
+            if not isinstance(entry, dict):
+                continue
+            base = target.get(appid)
+            target[appid] = {**base, **entry} if isinstance(base, dict) else entry
+
+    merged: dict = {}
+    for path in reversed(list(_iter_store_metadata_dirs())):
+        p = path / "games.json"
+        if not p.exists():
+            continue
+        try:
+            with p.open(encoding="utf-8") as f:
+                _overlay(merged, _normalize_games_data(json.load(f)))
+        except Exception:
+            continue
+    _overlay(merged, _games_cache or {})
+    _overlay(merged, new)
+    return merged
+
+
 def _load_games_json(force=False):
     global _games_cache, _games_cache_time, _loaded
     now = time.time()
@@ -234,9 +263,12 @@ def _load_games_json(force=False):
             request = _req.Request(_GAMES_JSON_URL, headers={"User-Agent": "SteaMidra/6.0.0"})
             with _req.urlopen(request, timeout=30, context=_get_ssl_ctx()) as resp:
                 data = json.load(resp)
-            _games_cache = _normalize_games_data(data)
-            if _games_cache:
-                _atomic_json_write(_get_cache_dir() / "games.json", data)
+            fetched = _normalize_games_data(data)
+            if fetched:
+                _games_cache = _merge_preserving_rich(fetched)
+                _atomic_json_write(_get_cache_dir() / "games.json", list(_games_cache.values()))
+            else:
+                _games_cache = fetched
             _games_cache_time = now
             _loaded = True
             logger.info("games.json fetched: %d entries", len(_games_cache))
@@ -431,7 +463,7 @@ def get_dlc_name(app_id: int | str) -> str:
 
 def get_game_drm(app_id: int) -> list:
     info = get_game_info(app_id)
-    return info.get("drm", [])
+    return info.get("drm", False)
 
 
 def get_game_tags(app_id: int) -> list:
@@ -521,7 +553,7 @@ def search_games_json(query: str, limit=500):
             results.append({
                 "app_id": int(appid_str) if appid_str.isdigit() else 0,
                 "name": name,
-                "drm": info.get("drm", []),
+                "drm": info.get("drm", False),
                 "tags": info.get("tags", []),
                 "nsfw": bool(info.get("nsfw", False)),
                 "header_image": info.get("header_image", ""),
@@ -542,7 +574,7 @@ def search_games_json(query: str, limit=500):
                 results.append({
                     "app_id": int(appid_str) if appid_str.isdigit() else 0,
                     "name": name,
-                    "drm": info.get("drm", []),
+                    "drm": info.get("drm", False),
                     "tags": info.get("tags", []),
                     "nsfw": bool(info.get("nsfw", False)),
                     "header_image": info.get("header_image", ""),
@@ -591,7 +623,7 @@ def search_games_by_tag(tag: str, offset=0, per_page=20):
                     "status": "",
                     "size": 0,
                     "image_url": info.get("header_image", ""),
-                    "drm": info.get("drm", []),
+                    "drm": info.get("drm", False),
                     "tags": info.get("tags", []),
                     "nsfw": bool(info.get("nsfw", False)),
                     "dlc": info.get("dlc", {}),
@@ -614,7 +646,7 @@ def search_games_by_tag(tag: str, offset=0, per_page=20):
                 "status": "",
                 "size": 0,
                 "image_url": info.get("header_image", ""),
-                "drm": info.get("drm", []),
+                "drm": info.get("drm", False),
                 "tags": info.get("tags", []),
                 "nsfw": bool(info.get("nsfw", False)),
                 "dlc": info.get("dlc", {}),
@@ -634,7 +666,7 @@ def enrich_game_dict(game: dict) -> dict:
     info = get_game_info(app_id)
     if not info:
         return game
-    game["drm"] = info.get("drm", [])
+    game["drm"] = info.get("drm", False)
     game["tags"] = info.get("tags", [])
     game["nsfw"] = bool(info.get("nsfw", False))
     game["image_url"] = game.get("image_url") or info.get("header_image", "")
@@ -712,7 +744,7 @@ def browse_games_json(offset=0, per_page=20, sort_by="updated", block_nsfw=False
             "status": "",
             "size": 0,
             "image_url": info.get("header_image", ""),
-            "drm": info.get("drm", []),
+            "drm": info.get("drm", False),
             "tags": info.get("tags", []),
             "nsfw": bool(info.get("nsfw", False)),
             "dlc": info.get("dlc", {}),

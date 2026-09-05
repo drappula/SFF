@@ -37,10 +37,29 @@ _qt_hidden   = _qt6[2] + _wec[2] + _wew[2]
 datas = [
 ] + _qt_datas
 
-# third_party tools (gbe_fork binaries, linux deps, etc.)
+# third_party tools. Allowlist mirrors build_sff_gui.spec: skip the
+# Windows-only dirs the Linux code never resolves. rclone is the .exe
+# twin of rclone_linux; gbe_fork_tools is the Windows generate_emu_config
+# (Linux uses the gbe_fork_tools_linux ELF). Everything else here runs on
+# Linux natively or through Wine (SteamAutoCrack, gbe_fork DLLs for
+# Proton games, steamless .exe fallback, coldloader DLLs).
 third_party_dir = os.path.join(spec_root, 'third_party')
 if os.path.exists(third_party_dir):
-    datas.append((third_party_dir, 'third_party'))
+    for name in (
+        'DDMod',
+        'SteamAutoCrack',
+        'coldloader',
+        'fzf',
+        'gbe_fork',
+        'gbe_fork_linux',
+        'gbe_fork_tools_linux',
+        'linux',
+        'rclone_linux',
+        'steamless',
+    ):
+        src = os.path.join(third_party_dir, name)
+        if os.path.exists(src):
+            datas.append((src, f'third_party/{name}'))
 
 # DLC unlocker bundled resources (CreamAPI, SmokeAPI, Koaloader, UplayR1/R2 DLLs)
 dlc_resources_dir = os.path.join(spec_root, 'sff', 'dlc_unlockers', 'resources')
