@@ -2054,6 +2054,19 @@ def _bridge_download_game_ddmod(bridge, app_id, source, lua_path, manifest_folde
             except Exception:
                 pass
 
+            # We killed Steam earlier to write config.vdf. Relaunch it with
+            # SLSsteam injected (start_steam sets LD_AUDIT in the process
+            # env). SLSsteam only reads config.yaml at init, so the restart
+            # is required for the new game to show as owned anyway.
+            if sys.platform.startswith("linux") and dest_is_library:
+                try:
+                    from sff.core.processes import is_proc_running
+                    from sff.linux.steam_process import start_steam
+                    if not is_proc_running("steam"):
+                        start_steam(print_fn=lambda m: None, steam_path=steam_path)
+                except Exception as _se:
+                    logger.debug("Steam relaunch after download failed: %s", _se)
+
             if ok and _size > 0:
                 if not dest_is_library:
                     return (
