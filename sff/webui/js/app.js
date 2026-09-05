@@ -2142,6 +2142,14 @@ window.App = (function() {
         return select ? select.value : '';
     }
 
+    function _getSelectedGameName() {
+        var select = document.getElementById('home-game-select');
+        if (!select || !select.value) return '';
+        var opt = select.options[select.selectedIndex];
+        var text = opt ? (opt.textContent || '') : '';
+        return text.replace(/\s*\(\d+\)\s*$/, '').trim();
+    }
+
     function _renderLetUpdatesList(games) {
         var listEl = document.getElementById('lu-game-list');
         var countEl = document.getElementById('lu-count');
@@ -2421,6 +2429,16 @@ window.App = (function() {
             'check_updates', 'scan_library', 'analytics', 'auto_lc_setup', 'lc_online_fix',
             'steam_updates', 'let_updates', 'fix_slssteam_hash'
         ];
+        // Start Menu entry uses a dedicated slot, not run_game_action
+        if (action === 'start_menu') {
+            var smId = _getSelectedGameId();
+            if (_outsideMode || !smId) {
+                Components.showToast('warning', 'Select a game from the Steam library first.');
+                return;
+            }
+            Bridge.call('create_start_menu_entry', smId, _getSelectedGameName());
+            return;
+        }
         // Outside-Steam game action
         if (_outsideMode && nonGameActions.indexOf(action) === -1) {
             var gamePath     = (document.getElementById('outside-path-display') || {}).value || '';

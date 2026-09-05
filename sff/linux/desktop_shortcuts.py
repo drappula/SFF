@@ -43,6 +43,13 @@ def _detect_exec_cmd(appid: str) -> str:
     flatpak_dir = Path.home() / ".var" / "app" / "com.valvesoftware.Steam"
     if flatpak_dir.exists():
         return f"flatpak run com.valvesoftware.Steam steam://rungameid/{appid}"
+    # The stock steam launcher carries no SLSsteam patch, so a shortcut that
+    # just runs `steam` boots plain Steam when it wasn't already up. Set the
+    # audit env the same way SteaMidra's own start_steam does.
+    sls = Path.home() / ".local" / "share" / "SLSsteam"
+    if (sls / "SLSsteam.so").is_file() and (sls / "library-inject.so").is_file():
+        audit = f"{sls / 'library-inject.so'}:{sls / 'SLSsteam.so'}"
+        return f'env LD_AUDIT="{audit}" steam steam://rungameid/{appid}'
     return f"steam steam://rungameid/{appid}"
 
 
@@ -151,14 +158,16 @@ def create_shortcut(
         print_fn("Fetching icon from Steam CDN...")
         icon_data = _fetch_icon_steam_cdn(appid)
 
-    icon_name = f"steam_icon_{appid}"
+    # ponytail: absolute path instead of theme name — hicolor cache is
+    # often stale right after writing, so a theme lookup shows no icon.
+    icon_name = "steam"
     if icon_data:
         installed = _install_icon(appid, icon_data)
         if installed:
+            icon_name = str(installed)
             print_fn(Fore.GREEN + f"Icon saved: {installed}" + Style.RESET_ALL)
     else:
         print_fn(Fore.YELLOW + "No icon available — shortcut will use default icon." + Style.RESET_ALL)
-        icon_name = "steam"
 
     safe_name = _safe_filename(game_name)
     exec_cmd = _detect_exec_cmd(appid)

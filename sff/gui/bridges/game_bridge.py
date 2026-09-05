@@ -392,6 +392,22 @@ def _bridge_run_game_action_outside(bridge, game_path, game_name_or_app_id, app_
 
     bridge._run_async(_do, on_done=_on_done)
 
+def _bridge_create_start_menu_entry(bridge, app_id, game_name):
+    """Add a Start Menu / app menu entry that launches the game via steam://."""
+    def _do():
+        try:
+            from sff.game.start_menu import create_start_menu_entry
+            return create_start_menu_entry(str(app_id), str(game_name or ""), bridge._steam_path)
+        except Exception as e:
+            logger.exception("create_start_menu_entry failed: %s", e)
+            return (False, str(e))
+
+    def _on_done(result):
+        ok, msg = result if isinstance(result, tuple) else (False, str(result))
+        bridge._emit_task_result("start_menu", bool(ok), str(msg))
+
+    bridge._run_async(_do, on_done=_on_done)
+
 def _bridge_extract_vdf_keys(bridge, vdf_path):
     """Extract depot keys from config.vdf."""
     try:

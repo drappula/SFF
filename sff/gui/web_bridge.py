@@ -87,6 +87,7 @@ from sff.gui.bridges.download_bridge import (
     _bridge_unlock_steam_readonly
 )
 from sff.gui.bridges.game_bridge import (
+    _bridge_create_start_menu_entry,
     _bridge_extract_vdf_keys,
     _bridge_fix_game,
     _bridge_generate_gbe_token,
@@ -1287,6 +1288,9 @@ class WebBridge(QObject):
     @pyqtSlot(str, str)
     def run_game_action(self, app_id, action):
         return _bridge_run_game_action(self, app_id, action)
+    @pyqtSlot(str, str)
+    def create_start_menu_entry(self, app_id, game_name):
+        return _bridge_create_start_menu_entry(self, app_id, game_name)
     def _resolve_acf(self, app_id):
         """Find ACFInfo for a given app_id by scanning Steam libraries.
 
