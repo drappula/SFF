@@ -1456,8 +1456,14 @@ def _bridge_connect_store(bridge, api_key):
         bridge._emit_task_result("store_connect", False, "API key is empty")
         return
     from sff.network.store_browser import StoreApiClient
-    if not StoreApiClient.validate_api_key(api_key):
-        bridge._emit_task_result("store_connect", False, "API key rejected by Hubcap. Check your key or try again.")
+    ok, reason = StoreApiClient.validate_api_key(api_key)
+    if not ok:
+        msg = {
+            "invalid": "API key rejected by Hubcap. Check your key or try again.",
+            "server": "Hubcap is having server trouble right now. Your key was not checked; try again in a few minutes.",
+            "network": "Cannot reach Hubcap. Check your internet connection and try again.",
+        }.get(reason, "API key validation failed.")
+        bridge._emit_task_result("store_connect", False, msg)
         return
     bridge._api_key = api_key
     bridge._store_client = StoreApiClient(api_key)

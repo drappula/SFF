@@ -163,19 +163,35 @@ class StoreApiClient:
 
     @staticmethod
     def validate_api_key(api_key):
-        """Test the key against the Hubcap API to see if it's valid."""
+        """Test the key against the Hubcap API.
+
+        Returns (ok, reason) where reason is "" on success, or one of
+        "invalid" (Hubcap rejected the key), "server" (Hubcap-side 5xx),
+        "network" (unreachable/timeout). Callers can tell a dead service
+        from a bad key instead of blaming the user for both.
+        """
         if not api_key or not str(api_key).strip():
-            return False
+            return False, "invalid"
         client = StoreApiClient(str(api_key).strip())
         return client.test_api_key()
 
     def test_api_key(self):
         try:
             resp = self._get_client().get("/user/stats")
-            return resp.status_code == 200
+        except httpx.RequestError as e:
+            logger.warning("API key test network error: %r", e)
+            return False, "network"
         except Exception as e:
             logger.warning("API key test failed: %r", e)
-            return False
+            return False, "network"
+        if resp.status_code == 200:
+            return True, ""
+        if resp.status_code in (401, 403):
+            return False, "invalid"
+        if resp.status_code >= 500:
+            logger.warning("Hubcap key test got server error %s", resp.status_code)
+            return False, "server"
+        return False, "invalid"
 
     # --- library browsing ---
 

@@ -625,8 +625,14 @@ class StoreTab(QWidget):
             return
         try:
             from sff.network.store_browser import StoreApiClient
-            if not StoreApiClient.validate_api_key(key):
-                QMessageBox.warning(self, "Invalid Key", "API key should start with 'smm_' and be at least 10 characters.")
+            ok, reason = StoreApiClient.validate_api_key(key)
+            if not ok:
+                if reason == "server":
+                    QMessageBox.warning(self, "Hubcap Unavailable", "Hubcap is having server trouble right now. Your key was not checked; try again in a few minutes.")
+                elif reason == "network":
+                    QMessageBox.warning(self, "Cannot Reach Hubcap", "Cannot reach Hubcap. Check your internet connection and try again.")
+                else:
+                    QMessageBox.warning(self, "Invalid Key", "Hubcap rejected this API key. Keys start with 'smm_' and last at least 10 characters.")
                 return
             self._client = StoreApiClient(api_key=key)
             self._status_label.setText("Connected! Search or browse the library.")
