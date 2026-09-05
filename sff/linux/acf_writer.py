@@ -18,7 +18,6 @@
 
 import os
 import re
-import sys
 from pathlib import Path
 
 from colorama import Fore, Style
@@ -51,7 +50,6 @@ def create_acf(
     selected_depots: list,
     size_on_disk: int = 0,
     print_fn=print,
-    steam_path: Path | None = None,
 ) -> bool:
     appid = str(game_data["appid"])
     game_name = game_data.get("game_name", f"App {appid}")
@@ -98,9 +96,6 @@ def create_acf(
             _last_owner = str(sid).strip()
     except Exception:
         pass
-    _launcher_path = ""
-    if steam_path:
-        _launcher_path = str(steam_path / "steam.exe" if sys.platform == "win32" else steam_path / "ubuntu12_32" / "steam")
     acf_content = (
         '"AppState"\n'
         '{\n'

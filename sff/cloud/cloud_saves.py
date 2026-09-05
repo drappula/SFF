@@ -99,20 +99,32 @@ def _load_all_games_cache():
     return _ALL_GAMES_CACHE
 
 # common save file locations to scan
-SAVE_LOCATIONS = [
-    # %APPDATA%
-    Path(os.environ.get("APPDATA", "")) / "Roaming",
-    Path(os.environ.get("APPDATA", "")),
-    # %LOCALAPPDATA%
-    Path(os.environ.get("LOCALAPPDATA", "")),
-    # Documents
-    Path.home() / "Documents" / "My Games",
-    Path.home() / "Documents",
-    # Saved Games
-    Path.home() / "Saved Games",
-    # Steam userdata
-    Path(r"C:\Program Files (x86)\Steam\userdata"),
-]
+if sys.platform == "win32":
+    SAVE_LOCATIONS = [
+        # %APPDATA%
+        Path(os.environ.get("APPDATA", "")) / "Roaming",
+        Path(os.environ.get("APPDATA", "")),
+        # %LOCALAPPDATA%
+        Path(os.environ.get("LOCALAPPDATA", "")),
+        # Documents
+        Path.home() / "Documents" / "My Games",
+        Path.home() / "Documents",
+        # Saved Games
+        Path.home() / "Saved Games",
+        # Steam userdata
+        Path(r"C:\Program Files (x86)\Steam\userdata"),
+    ]
+else:
+    # Unset env vars would collapse to Path("."), making the scanner walk
+    # the CWD. Only add dirs that actually resolve.
+    _xdg_data = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share"))
+    _xdg_config = Path(os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config"))
+    SAVE_LOCATIONS = [
+        _xdg_data,
+        _xdg_config,
+        Path.home() / ".steam" / "steam" / "userdata",
+        Path.home() / ".local" / "share" / "Steam" / "userdata",
+    ]
 
 # folder names that often contain game saves
 SAVE_FOLDER_HINTS = [

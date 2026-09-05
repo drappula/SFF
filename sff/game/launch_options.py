@@ -19,6 +19,7 @@
 """Read and write per-game Steam launch options via localconfig.vdf."""
 
 import logging
+import sys
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -30,12 +31,14 @@ _ONLINE_FIX_FLAG = "-onlinefix"
 
 
 def _is_steam_running() -> bool:
-    """True when steam.exe is alive — local check to avoid pulling sff.processes."""
+    """True when the Steam client is alive — local check to avoid pulling sff.processes."""
+    # Linux names the process "steam", Windows "steam.exe".
+    wanted = "steam.exe" if sys.platform == "win32" else "steam"
     try:
         import psutil
         for proc in psutil.process_iter(["name"]):
             try:
-                if (proc.info.get("name") or "").lower() == "steam.exe":
+                if (proc.info.get("name") or "").lower() == wanted:
                     return True
             except psutil.Error:
                 continue

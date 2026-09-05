@@ -623,18 +623,18 @@ def download_depot(
                 print_fn(f"[native] Failed chunk {sha[:16]}... ({total_done[0]}/{total} done)")
                 return False, total_bytes[0]
 
+            pct = (total_done[0] / total) * 100
+            # UI progress line: time-gated (~2/sec), NOT chunk-gated, so a
+            # slow chunk cadence doesn't freeze the bar between depots.
+            _now = time.monotonic()
+            if _now - _last_prog_t >= 0.5 or total_done[0] == total:
+                _last_prog_t = _now
+                _speed = total_bytes[0] / max(_now - _dl_start, 0.001)
+                print_fn(
+                    f"[PROG] {pct:.1f}% | {total_bytes[0]}/{pending_bytes} bytes | {_speed:.0f} B/s"
+                )
             if total_done[0] % 100 == 0 or total_done[0] == total:
-                pct = (total_done[0] / total) * 100
                 print_fn(f"\r[native] {total_done[0]}/{total} chunks ({pct:.0f}%) | {skipped} cached | {total_bytes[0]:,} B")
-                # Structured line for the UI progress scraper: percent,
-                # bytes done/total, speed. Throttled to ~2/sec.
-                _now = time.monotonic()
-                if _now - _last_prog_t >= 0.5 or total_done[0] == total:
-                    _last_prog_t = _now
-                    _speed = total_bytes[0] / max(_now - _dl_start, 0.001)
-                    print_fn(
-                        f"[PROG] {pct:.1f}% | {total_bytes[0]}/{pending_bytes} bytes | {_speed:.0f} B/s"
-                    )
 
     http_client.close()
     client.disconnect()

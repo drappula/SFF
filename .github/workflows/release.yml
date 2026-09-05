@@ -20,38 +20,6 @@ jobs:
             libxkbcommon-x11-0 libxcb-cursor0 libxcb-xkb1 libxcb-image0 \
             libxcb-keysyms1 libxcb-util1 libxcb-render-util0 libxcb-icccm4 \
             libxcb-shape0 libasound2t64
-      - name: Generate Google Drive credential shim
-        env:
-          STEAMIDRA_GDRIVE_CLIENT_ID: ${{ secrets.STEAMIDRA_GDRIVE_CLIENT_ID }}
-          STEAMIDRA_GDRIVE_CLIENT_SECRET: ${{ secrets.STEAMIDRA_GDRIVE_CLIENT_SECRET }}
-        run: |
-          python3 - <<'PY'
-          import os
-          from pathlib import Path
-          cid = os.environ.get("STEAMIDRA_GDRIVE_CLIENT_ID", "")
-          secret = os.environ.get("STEAMIDRA_GDRIVE_CLIENT_SECRET", "")
-          if not cid or not secret:
-              raise SystemExit("Google Drive secrets are missing")
-          Path("sff/core/_gc.py").write_text(
-              "# SteaMidra - generated in CI; do not commit\n"
-              "def get_ci():\n"
-              f"    return {cid!r}\n\n"
-              "def get_cs():\n"
-              f"    return {secret!r}\n",
-              encoding="utf-8",
-          )
-          PY
-      - name: Verify Google Drive support
-        run: |
-          python3 -m pip install --upgrade pip
-          python3 -m pip install vdf google-auth google-auth-oauthlib google-api-python-client
-          python3 - <<'PY'
-          import sff.core._gc
-          from sff.cloud.google_drive import is_available
-          if not is_available():
-              raise SystemExit("Google Drive support is not available")
-          print("Google Drive imports OK")
-          PY
       - name: Build Linux AppImage
         run: bash build_linux_appimage.sh --fresh
       - name: Create Linux zip
@@ -78,16 +46,6 @@ jobs:
           python-version: '3.12'
       - name: Install NSIS
         uses: negrutiu/nsis-install@v2
-      - name: Generate Google Drive credential shim
-        shell: pwsh
-        env:
-          STEAMIDRA_GDRIVE_CLIENT_ID: ${{ secrets.STEAMIDRA_GDRIVE_CLIENT_ID }}
-          STEAMIDRA_GDRIVE_CLIENT_SECRET: ${{ secrets.STEAMIDRA_GDRIVE_CLIENT_SECRET }}
-        run: |
-          if (-not $env:STEAMIDRA_GDRIVE_CLIENT_ID -or -not $env:STEAMIDRA_GDRIVE_CLIENT_SECRET) {
-            throw "Google Drive secrets are missing"
-          }
-          python -c "from pathlib import Path; import os; cid=os.environ['STEAMIDRA_GDRIVE_CLIENT_ID']; secret=os.environ['STEAMIDRA_GDRIVE_CLIENT_SECRET']; Path('sff/core/_gc.py').write_text('# SteaMidra - generated in CI; do not commit\n' + 'def get_ci():\n' + f'    return {cid!r}\n\n' + 'def get_cs():\n' + f'    return {secret!r}\n', encoding='utf-8')"
       - name: Run full build_installer.bat
         shell: cmd
         run: |
@@ -97,7 +55,7 @@ jobs:
           python -m pip install -r requirements.txt || exit /b 1
           python -m pip install steam==1.4.4 --no-deps || exit /b 1
           python -m pip install pyinstaller || exit /b 1
-          python -c "import PyQt6.QtCore, PyQt6.QtWebEngineCore, prompt_toolkit, selenium, keyring, nacl, cryptography, googleapiclient, zendriver, bs4; import sff.core._gc; from sff.cloud.google_drive import is_available; assert is_available(); print('all imports OK')" || exit /b 1
+          python -c "import PyQt6.QtCore, PyQt6.QtWebEngineCore, prompt_toolkit, selenium, keyring, nacl, cryptography, googleapiclient, zendriver, bs4; print('all imports OK')" || exit /b 1
           call build_installer.bat
           if not exist "dist\SteaMidra_GUI\_internal\PyQt6\Qt6\bin\Qt6Core.dll" (
             echo ERROR: Qt6Core.dll missing from _internal — PyInstaller produced a hollow build.

@@ -688,6 +688,12 @@ select:focus-visible,
   display: none;
 }
 
+#store-provider-status,
+#home-provider-status {
+  font-size: 11px;
+  opacity: 0.55;
+}
+
 #store-provider-status {
   padding-inline: 4px;
   overflow: hidden;

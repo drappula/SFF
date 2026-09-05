@@ -1926,7 +1926,12 @@ def _bridge_download_game_ddmod(bridge, app_id, source, lua_path, manifest_folde
             _cur_depot = [None]
 
             def _depot_label(d):
-                return _depot_labels.get(str(d), f"depot {d}")
+                lbl = _depot_labels.get(str(d))
+                if not lbl:
+                    return f"depot {d}"
+                if lbl in _os_pretty.values() or lbl.startswith(("Linux", "Windows", "macOS")):
+                    return f"{lbl} depot"
+                return lbl
 
             def _print_fn(msg):
                 import time as _t
@@ -2031,7 +2036,6 @@ def _bridge_download_game_ddmod(bridge, app_id, source, lua_path, manifest_folde
                         selected_depots=selected_depots,
                         size_on_disk=_size,
                         print_fn=_print_fn,
-                        steam_path=steam_path,
                     )
                 except Exception as _ae:
                     logger.warning("ACF write failed (non-fatal): %s", _ae)
