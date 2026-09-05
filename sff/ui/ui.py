@@ -843,7 +843,7 @@ class UI:
         else:
             downloader.download_manifests(parsed_lua, auto_manifest=True)
         from sff.downloads.dotnet_utils import ensure_dotnet_9
-        from sff.downloads.depot_downloader import run_download, filter_depots_by_os
+        from sff.downloads.depot_downloader import run_download, filter_depots_by_os, resolve_target_os
         from pathvalidate import sanitize_filename
         # Run DDMod on every platform when .NET 9 is present. Linux
         # earlier branched on SLSteam to skip DDMod entirely, but that
@@ -879,9 +879,10 @@ class UI:
                 _app_info = provider.get_single_app_info(int(parsed_lua.app_id))
             except Exception:
                 _app_info = None
-            _selected = filter_depots_by_os(_selected, _app_info, print_fn=print)
+            _target_os = resolve_target_os(_selected, _app_info, print_fn=print)
+            _selected = filter_depots_by_os(_selected, _app_info, print_fn=print, os_name=_target_os)
             _download_ok, _download_size = run_download(
-                _game_data, _selected, lib_path, self.steam_path, print_fn=print
+                _game_data, _selected, lib_path, self.steam_path, print_fn=print, os_name=_target_os
             )
         else:
             if sys.platform != "win32":
@@ -949,7 +950,7 @@ class UI:
         import time
         from pathvalidate import sanitize_filename
         from sff.downloads.dotnet_utils import ensure_dotnet_9
-        from sff.downloads.depot_downloader import run_download, filter_depots_by_os, MANIFESTS_TMP
+        from sff.downloads.depot_downloader import run_download, filter_depots_by_os, resolve_target_os, MANIFESTS_TMP
         from sff.lua.choices import download_lua_direct
         from sff.lua.manager import parse_lua_contents
         start_time = time.time()
@@ -1080,10 +1081,11 @@ class UI:
             _app_info_os = provider.get_single_app_info(int(parsed_lua.app_id))
         except Exception:
             _app_info_os = None
-        selected_depots = filter_depots_by_os(selected_depots, _app_info_os, print_fn=print)
+        _target_os = resolve_target_os(selected_depots, _app_info_os, print_fn=print)
+        selected_depots = filter_depots_by_os(selected_depots, _app_info_os, print_fn=print, os_name=_target_os)
         print(Fore.YELLOW + "\nDownloading game files via DepotDownloaderMod:" + Style.RESET_ALL)
         download_ok, size_on_disk = run_download(
-            game_data, selected_depots, lib_path, self.steam_path, print_fn=print,
+            game_data, selected_depots, lib_path, self.steam_path, print_fn=print, os_name=_target_os,
         )
         try:
             import shutil as _shutil

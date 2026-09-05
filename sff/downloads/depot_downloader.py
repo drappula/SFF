@@ -580,6 +580,42 @@ def run_download(
     return all_ok, size_on_disk
 
 
+def resolve_target_os(
+    selected_depots: list,
+    app_info: dict,
+    os_name: str | None = None,
+    print_fn=print,
+) -> str:
+    """Pick the effective OS for both depot selection and file filtering.
+
+    Linux games with no Linux depot run through Proton, which needs the
+    Windows depots AND the Windows file filter — same fallback Steam
+    applies. Only triggers when the selection has platform-specific depots
+    at all (empty oslist = shared content). Returns the possibly-adjusted
+    target; callers must pass the result to both filter_depots_by_os and
+    run_download so the two layers agree.
+    """
+    target = (os_name or ("linux" if sys.platform.startswith("linux") else "windows")).lower()
+    if target != "linux" or not app_info:
+        return target
+    depots_section = app_info.get("depots", {}) if isinstance(app_info, dict) else {}
+    oslists = []
+    for d in selected_depots:
+        meta = depots_section.get(str(d), {})
+        if isinstance(meta, dict):
+            ol = (meta.get("config", {}) or {}).get("oslist", "") or ""
+            if ol:
+                oslists.append(ol.lower())
+    if oslists and not any("linux" in o for o in oslists):
+        print_fn(
+            Fore.CYAN
+            + "No Linux depot available — downloading Windows depots (run via Proton)."
+            + Style.RESET_ALL
+        )
+        return "windows"
+    return target
+
+
 def filter_depots_by_os(
     selected_depots: list,
     app_info: dict,

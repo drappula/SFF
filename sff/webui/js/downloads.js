@@ -55,7 +55,15 @@ window.Downloads = (function() {
         var clearBtn = document.getElementById('queue-clear-finished');
         if (pauseBtn) pauseBtn.addEventListener('click', function() { Bridge.call('download_queue_pause'); });
         if (resumeBtn) resumeBtn.addEventListener('click', function() { Bridge.call('download_queue_resume'); });
-        if (clearBtn) clearBtn.addEventListener('click', function() { Bridge.call('download_queue_clear_finished'); });
+        if (clearBtn) clearBtn.addEventListener('click', function() {
+            // "Download History" is rendered from the JS _downloads map, not
+            // the backend queue, so clear both or the history stays put.
+            Object.keys(_downloads).forEach(function(id) {
+                if (!_downloads[id].active) delete _downloads[id];
+            });
+            _render();
+            Bridge.call('download_queue_clear_finished');
+        });
 
         var queueList = document.getElementById('downloads-queue-list');
         if (queueList) {

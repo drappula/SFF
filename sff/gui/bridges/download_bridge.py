@@ -44,6 +44,10 @@ logger = logging.getLogger(__name__)
 
 _ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
 _DDMOD_PCT_RE = re.compile(r"^\s*(\d{1,3}(?:\.\d+)?)%\s")
+# DDMod's live progress line is "<pct>% <current file path>". The percent is
+# per-depot; DDMod never prints byte counts, so we derive done bytes from
+# percent * the depot's total size (from app info).
+_DDMOD_PCT_FILE_RE = re.compile(r"^\s*(\d{1,3}(?:\.\d+)?)%\s+(.*)$")
 # native_downloader emits: "[PROG] 45.0% | 1234567/50000000 bytes | 4200000 B/s"
 _PROG_RE = re.compile(
     r"^\[PROG\]\s+(\d{1,3}(?:\.\d+)?)%\s+\|\s+(\d+)/(\d+)\s+bytes\s+\|\s+(\d+)\s+B/s"
@@ -1583,9 +1587,15 @@ def _bridge_download_game_ddmod(bridge, app_id, source, lua_path, manifest_folde
                         # on Linux the process is "steam", so use the Linux
                         # helper which matches it and caches SLSteam .so paths.
                         from sff.linux.steam_process import kill_steam
+                        from sff.core.processes import is_proc_running
                         kill_steam(print_fn=lambda m: None)
+                        # Poll until the steam client is actually gone instead
+                        # of a fixed sleep; SIGKILL is fast, so this usually
+                        # clears in a fraction of a second. Capped at 5s.
                         import time as _t3
-                        _t3.sleep(2)
+                        _w = 0.0
+                        while is_proc_running("steam") and _w < 5.0:
+                            _t3.sleep(0.1); _w += 0.1
                     else:
                         from sff.core.processes import SteamProcess, is_proc_running
                         _sp = SteamProcess(steam_path)
@@ -1877,8 +1887,11 @@ def _bridge_download_game_ddmod(bridge, app_id, source, lua_path, manifest_folde
                     "or run Update All Games first.",
                 )
 
+            _n_dep = len(selected_depots)
             bridge.download_progress.emit(json.dumps({
-                "app_id": app_id, "status": "Running DepotDownloaderMod...", "progress": 35
+                "app_id": app_id, "name": game_name or f"App {app_id}",
+                "status": f"Starting download ({_n_dep} depot{'s' if _n_dep != 1 else ''})...",
+                "progress": 35,
             }))
 
             _last_emit = [0.0]
@@ -1924,6 +1937,48 @@ def _bridge_download_game_ddmod(bridge, app_id, source, lua_path, manifest_folde
             except Exception:
                 pass
             _cur_depot = [None]
+            # Depot total sizes (bytes) for the "X / Y MB" display. DDMod's
+            # percent is per-depot, so done = pct * size. Match the branch
+            # whose gid equals the manifest we're downloading; fall back to
+            # any branch size. Sizes live in depots[id].manifests[bid].size.
+            _depot_sizes = {}
+            try:
+                for _did, _dcfg in (_app_info.get("depots", {}) or {}).items():
+                    _did = str(_did)
+                    _mans = (_dcfg or {}).get("manifests", {}) if isinstance(_dcfg, dict) else {}
+                    _want_gid = str(manifests_dict.get(_did, ""))
+                    _sz = 0
+                    for _bid, _minfo in (_mans or {}).items():
+                        if not isinstance(_minfo, dict):
+                            continue
+                        if _want_gid and str(_minfo.get("gid", "")) == _want_gid:
+                            _sz = int(_minfo.get("size") or 0)
+                            break
+                        if not _sz:
+                            _sz = int(_minfo.get("size") or 0)
+                    if _sz:
+                        _depot_sizes[_did] = _sz
+            except Exception:
+                pass
+            # DDMod speed: delta bytes / delta seconds between progress lines.
+            _ddmod_last = [0.0, 0, 0.0]  # monotonic, done_bytes, smoothed B/s
+
+            def _ddmod_speed(now, done_b):
+                _, prev_b, prev_s = _ddmod_last
+                inst = 0.0
+                if prev_b and done_b >= prev_b:
+                    dt = now - _ddmod_last[0]
+                    if dt > 0.05:
+                        inst = (done_b - prev_b) / dt
+                if inst > 0:
+                    # EMA so the number doesn't jitter line to line
+                    smoothed = prev_s * 0.7 + inst * 0.3 if prev_s else inst
+                else:
+                    smoothed = prev_s
+                _ddmod_last[0] = now
+                _ddmod_last[1] = done_b
+                _ddmod_last[2] = smoothed
+                return smoothed
 
             def _depot_label(d):
                 lbl = _depot_labels.get(str(d))
@@ -1945,6 +2000,9 @@ def _bridge_download_game_ddmod(bridge, app_id, source, lua_path, manifest_folde
                 if _dm:
                     _cur_depot[0] = _dm.group(1)
                     _last_pct[0] = -1.0
+                    _ddmod_last[0] = now
+                    _ddmod_last[1] = 0
+                    _ddmod_last[2] = 0.0
 
                 # Native downloader's structured progress line carries
                 # bytes and speed, which DDMod's bare "NN%" lines don't.
@@ -1963,6 +2021,35 @@ def _bridge_download_game_ddmod(bridge, app_id, source, lua_path, manifest_folde
                             f"Downloading {_lbl}... {_fmt_bytes(done_b)} / {_fmt_bytes(total_b)}"
                             f" ({_fmt_bytes(speed)}/s)"
                         )
+                        try:
+                            bridge.download_progress.emit(json.dumps({
+                                "app_id": app_id,
+                                "name": game_name or f"App {app_id}",
+                                "status": status,
+                                "progress": mapped_int,
+                            }))
+                        except Exception:
+                            pass
+                    return
+
+                pct_file = _DDMOD_PCT_FILE_RE.match(clean)
+                if pct_file:
+                    raw = float(pct_file.group(1))
+                    total_b = _depot_sizes.get(str(_cur_depot[0]), 0) if _cur_depot[0] else 0
+                    done_b = int(raw / 100.0 * total_b) if total_b else 0
+                    mapped = _DDMOD_FLOOR + (raw / 100.0) * (_DDMOD_CEIL - _DDMOD_FLOOR)
+                    mapped_int = int(mapped)
+                    if mapped_int != int(_last_pct[0]):
+                        _last_pct[0] = mapped
+                        _lbl = _depot_label(_cur_depot[0]) if _cur_depot[0] else "depot files"
+                        if total_b:
+                            speed = _ddmod_speed(now, done_b)
+                            status = (
+                                f"Downloading {_lbl}... {_fmt_bytes(done_b)} / {_fmt_bytes(total_b)}"
+                                f" ({_fmt_bytes(speed)}/s)"
+                            )
+                        else:
+                            status = f"Downloading {_lbl}... {raw:.1f}%"
                         try:
                             bridge.download_progress.emit(json.dumps({
                                 "app_id": app_id,
@@ -2004,6 +2091,11 @@ def _bridge_download_game_ddmod(bridge, app_id, source, lua_path, manifest_folde
             _target_os = (target_os or "").strip().lower()
             if _target_os not in ("windows", "linux", "macos", "all"):
                 _target_os = "linux" if sys.platform.startswith("linux") else "windows"
+            # Proton fallback: no Linux depot -> Windows depots + Windows
+            # file filter. Resolved once so depot selection and run_download
+            # agree.
+            from sff.downloads.depot_downloader import resolve_target_os
+            _target_os = resolve_target_os(selected_depots, _app_info, _target_os, print_fn=_print_fn)
             selected_depots = filter_depots_by_os(selected_depots, _app_info, print_fn=_print_fn, os_name=_target_os)
             for _sk in [k for k in list(depots_dict.keys()) if k not in selected_depots]:
                 del depots_dict[_sk]
@@ -2053,19 +2145,6 @@ def _bridge_download_game_ddmod(bridge, app_id, source, lua_path, manifest_folde
                 get_recent_files_manager().add(lua_file)
             except Exception:
                 pass
-
-            # We killed Steam earlier to write config.vdf. Relaunch it with
-            # SLSsteam injected (start_steam sets LD_AUDIT in the process
-            # env). SLSsteam only reads config.yaml at init, so the restart
-            # is required for the new game to show as owned anyway.
-            if sys.platform.startswith("linux") and dest_is_library:
-                try:
-                    from sff.core.processes import is_proc_running
-                    from sff.linux.steam_process import start_steam
-                    if not is_proc_running("steam"):
-                        start_steam(print_fn=lambda m: None, steam_path=steam_path)
-                except Exception as _se:
-                    logger.debug("Steam relaunch after download failed: %s", _se)
 
             if ok and _size > 0:
                 if not dest_is_library:
