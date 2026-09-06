@@ -359,6 +359,85 @@ def patch_steam_sh(steam_path: Path, print_fn=print) -> bool:
         return False
 
 
+STEAM_JUPITER = Path("/usr/bin/steam-jupiter")
+
+
+def is_steamos() -> bool:
+    """True on SteamOS / Steam Deck: the jupiter launch script exists and
+    /etc/os-release says so."""
+    if not _IS_LINUX or not STEAM_JUPITER.exists():
+        return False
+    try:
+        text = Path("/etc/os-release").read_text(encoding="utf-8", errors="replace").lower()
+    except OSError:
+        return False
+    return "steamos" in text
+
+
+def patch_steam_jupiter(print_fn=print) -> bool:
+    """Inject the SLSsteam LD_AUDIT export into /usr/bin/steam-jupiter so
+    Gaming Mode gets ownership injection (Desktop Mode works via steam.sh,
+    but Gaming Mode launches through this separate root-owned script).
+    SteamOS updates reset the file; re-run after every update."""
+    if not _IS_LINUX:
+        return False
+    if not STEAM_JUPITER.exists():
+        print_fn(Fore.YELLOW + "steam-jupiter not found. Not a Steam Deck?" + Style.RESET_ALL)
+        return False
+
+    steam_type = detect_steam_type()
+    install_dir = get_slssteam_install_dir(steam_type)
+    ld_line = f"export LD_AUDIT={install_dir}/library-inject.so:{install_dir}/SLSsteam.so"
+
+    try:
+        lines = STEAM_JUPITER.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError as e:
+        print_fn(Fore.RED + f"Cannot read steam-jupiter: {e}" + Style.RESET_ALL)
+        return False
+
+    if any("LD_AUDIT" in l and "SLSsteam" in l for l in lines):
+        print_fn(Fore.GREEN + "Gaming Mode already patched. Nothing to do." + Style.RESET_ALL)
+        return True
+
+    exec_idx = next((i for i in range(len(lines) - 1, -1, -1)
+                     if lines[i].lstrip().startswith("exec ")), None)
+    if exec_idx is None:
+        print_fn(Fore.RED + "No exec line found in steam-jupiter; refusing to patch." + Style.RESET_ALL)
+        return False
+
+    patched = lines[:exec_idx] + [ld_line] + lines[exec_idx:]
+
+    tmp = None
+    try:
+        fd, tmp_name = tempfile.mkstemp(prefix="steam-jupiter.", suffix=".patched")
+        os.close(fd)
+        tmp = Path(tmp_name)
+        tmp.write_text("\n".join(patched) + "\n", encoding="utf-8")
+        if not (STEAM_JUPITER.parent / "steam-jupiter.steamidra.bak").exists():
+            print_fn(Fore.CYAN + "[jupiter] Backing up original to steam-jupiter.steamidra.bak..." + Style.RESET_ALL)
+            subprocess.run(["sudo", "cp", str(STEAM_JUPITER),
+                            str(STEAM_JUPITER.parent / "steam-jupiter.steamidra.bak")],
+                           timeout=30, check=True)
+        print_fn(Fore.CYAN + "[jupiter] Writing patched steam-jupiter (sudo)..." + Style.RESET_ALL)
+        subprocess.run(["sudo", "cp", str(tmp), str(STEAM_JUPITER)], timeout=30, check=True)
+        subprocess.run(["sudo", "chmod", "755", str(STEAM_JUPITER)], timeout=30, check=True)
+    except subprocess.CalledProcessError as e:
+        print_fn(Fore.RED + f"sudo write failed ({e}). In Konsole: sudo steamos-readonly disable" + Style.RESET_ALL)
+        return False
+    except OSError as e:
+        print_fn(Fore.RED + f"Failed to patch steam-jupiter: {e}" + Style.RESET_ALL)
+        return False
+    finally:
+        if tmp is not None:
+            try:
+                tmp.unlink()
+            except Exception:
+                pass
+
+    print_fn(Fore.GREEN + "Gaming Mode patched. Reboot into Gaming Mode to test." + Style.RESET_ALL)
+    return True
+
+
 def create_steam_cfg(steam_path: Path, print_fn=print) -> bool:
     cfg_path = steam_path / "steam.cfg"
     content = "BootStrapperInhibitAll=enable\nBootStrapperForceSelfUpdate=disable\n"

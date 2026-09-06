@@ -10,6 +10,9 @@ window.Downloads = (function() {
     var _initialized = false;
     var _MAX_HISTORY = 100;
     var _queueState = { items: [], paused: false, concurrency: 3 };
+    var _cancelling = {};  // item ids awaiting engine stop
+    var _pendingCancel = null;  // {id, name} while the confirm dialog is open
+    var _pendingActiveCancel = null;  // app_id for non-queue downloads
 
     function _trimHistory() {
         var completed = Object.keys(_downloads).filter(function(id) {
@@ -73,9 +76,54 @@ window.Downloads = (function() {
                 var id = btn.dataset.itemId;
                 if (btn.dataset.queueAction === 'retry') {
                     Bridge.call('download_queue_retry', id);
+                } else if (btn.dataset.queueAction === 'cancel') {
+                    var row = btn.closest('.download-item');
+                    var nameEl = row && row.querySelector('.download-name');
+                    _pendingActiveCancel = null;
+                    _pendingCancel = { id: id, name: nameEl ? nameEl.textContent : ('App ' + id) };
+                    var nameTarget = document.getElementById('queue-cancel-game-name');
+                    if (nameTarget) nameTarget.textContent = _pendingCancel.name;
+                    Components.showModal('queue-cancel-modal');
                 } else if (btn.dataset.queueAction === 'remove') {
                     Bridge.call('download_queue_remove', id);
                 }
+            });
+        }
+
+        var doCancel = function(deleteFiles) {
+            if (_pendingActiveCancel) {
+                var btn = activeBtnFor(_pendingActiveCancel);
+                if (btn) { btn.disabled = true; btn.textContent = 'Cancelling…'; }
+                Bridge.call('download_cancel_active', _pendingActiveCancel, deleteFiles);
+                _pendingActiveCancel = null;
+            } else if (_pendingCancel) {
+                _cancelling[_pendingCancel.id] = true;
+                Bridge.call('download_queue_cancel', _pendingCancel.id, deleteFiles);
+                _pendingCancel = null;
+                _renderQueue();
+            }
+            Components.hideModal('queue-cancel-modal');
+        };
+        var activeBtnFor = function(appid) {
+            var list = document.getElementById('downloads-active-list');
+            return list && list.querySelector('[data-cancel-appid="' + appid + '"]');
+        };
+        var keepBtn = document.getElementById('queue-cancel-keep');
+        var delBtn = document.getElementById('queue-cancel-delete');
+        if (keepBtn) keepBtn.addEventListener('click', function() { doCancel(false); });
+        if (delBtn) delBtn.addEventListener('click', function() { doCancel(true); });
+
+        var activeList = document.getElementById('downloads-active-list');
+        if (activeList) {
+            activeList.addEventListener('click', function(e) {
+                var btn = e.target.closest('[data-cancel-appid]');
+                if (!btn) return;
+                _pendingActiveCancel = btn.dataset.cancelAppid;
+                var row = btn.closest('.download-item');
+                var nameEl = row && row.querySelector('.download-item-name');
+                var nameTarget = document.getElementById('queue-cancel-game-name');
+                if (nameTarget) nameTarget.textContent = nameEl ? nameEl.textContent : ('App ' + _pendingActiveCancel);
+                Components.showModal('queue-cancel-modal');
             });
         }
     }
@@ -93,9 +141,10 @@ window.Downloads = (function() {
 
     function _updateDownload(data) {
         var id = data.id || data.app_id || 'unknown';
+        var prev = _downloads[id];
         _downloads[id] = {
             id: id,
-            name: data.name || ('App ' + id),
+            name: data.name || (prev && prev.name) || ('App ' + id),
             status: data.status || 'Downloading',
             progress: data.progress || 0,
             active: true,
@@ -126,6 +175,9 @@ window.Downloads = (function() {
         _render();
     }
 
+    var _rowEls = {};       // id -> active row element, patched in place
+    var _queueRowEls = {};  // queue item id -> row element
+
     function _render() {
         var activeList = document.getElementById('downloads-active-list');
         var activeEmpty = document.getElementById('downloads-active-empty');
@@ -144,9 +196,23 @@ window.Downloads = (function() {
         });
 
         if (activeList) {
-            activeList.innerHTML = '';
+            var seen = {};
             activeItems.forEach(function(dl) {
-                activeList.appendChild(Components.createDownloadItem(dl));
+                seen[dl.id] = true;
+                var el = _rowEls[dl.id];
+                if (!el || el.parentNode !== activeList) {
+                    el = Components.createDownloadItem(dl);
+                    _rowEls[dl.id] = el;
+                    activeList.appendChild(el);
+                } else {
+                    _patchActiveRow(el, dl);
+                }
+            });
+            Array.prototype.slice.call(activeList.children).forEach(function(el) {
+                if (!seen[el.dataset.id]) {
+                    delete _rowEls[el.dataset.id];
+                    el.remove();
+                }
             });
         }
         if (activeEmpty) {
@@ -162,39 +228,90 @@ window.Downloads = (function() {
         }
     }
 
+    function _patchActiveRow(el, dl) {
+        var nameEl = el.querySelector('.download-item-name');
+        if (nameEl && dl.name && nameEl.textContent !== dl.name) nameEl.textContent = dl.name;
+        var statusEl = el.querySelector('.download-item-status');
+        if (statusEl) {
+            var t = dl.status || 'Pending';
+            if (dl.progress !== undefined) t += ' — ' + Math.round(dl.progress) + '%';
+            if (statusEl.textContent !== t) statusEl.textContent = t;
+        }
+        var fill = el.querySelector('.download-progress-fill');
+        if (fill) fill.style.width = (dl.progress || 0) + '%';
+    }
+
+    function _buildQueueRow(item) {
+        var stateLabel = item.state;
+        var badgeClass = 'queue-badge-' + item.state;
+        var actions = '';
+        if (item.state === 'failed') {
+            actions += '<button class="btn btn-sm" data-queue-action="retry" data-item-id="' + Components.escapeHtml(item.id) + '">Retry</button>';
+        }
+        if (item.state === 'downloading') {
+            if (_cancelling[item.id]) {
+                actions += '<button class="btn btn-sm" disabled>Cancelling…</button>';
+            } else {
+                actions += '<button class="btn btn-sm" data-queue-action="cancel" data-item-id="' + Components.escapeHtml(item.id) + '">Cancel</button>';
+            }
+        } else {
+            actions += '<button class="btn btn-sm" data-queue-action="remove" data-item-id="' + Components.escapeHtml(item.id) + '">Remove</button>';
+        }
+        if (item.error) {
+            actions += '<span style="font-size:11px;opacity:0.7;margin-left:6px;" title="' + Components.escapeHtml(item.error) + '">(error)</span>';
+        }
+        var row = document.createElement('div');
+        row.className = 'download-item';
+        row.dataset.itemid = item.id;
+        row.innerHTML =
+            '<div class="download-info" style="flex:1;">' +
+                '<div class="download-name">' + Components.escapeHtml(item.name || ('App ' + item.app_id)) +
+                ' <span class="queue-state-badge ' + badgeClass + '">' + Components.escapeHtml(stateLabel) + '</span>' +
+                ' <span style="font-size:11px;opacity:0.65;">via ' + Components.escapeHtml(item.source) + '</span></div>' +
+                '<div class="progress-bar" style="margin-top:4px;"><div class="progress-fill" style="width:0%"></div></div>' +
+                '<div class="queue-pct" style="font-size:11px;opacity:0.6;">0%</div>' +
+            '</div>' +
+            '<div class="download-actions" style="display:flex;gap:6px;align-items:center;">' + actions + '</div>';
+        return row;
+    }
+
     function _renderQueue() {
         var listEl = document.getElementById('downloads-queue-list');
         var emptyEl = document.getElementById('downloads-queue-empty');
         var pauseBtn = document.getElementById('queue-pause');
         var resumeBtn = document.getElementById('queue-resume');
         var items = (_queueState && _queueState.items) || [];
+        var liveIds = {};
+        items.forEach(function(item) { liveIds[item.id] = true; });
+        Object.keys(_cancelling).forEach(function(id) {
+            if (!liveIds[id]) delete _cancelling[id];
+        });
         if (listEl) {
-            listEl.innerHTML = '';
+            var seenIds = {};
             items.forEach(function(item) {
+                seenIds[item.id] = true;
                 var dl = _downloads[String(item.app_id)];
                 var progress = dl && typeof dl.progress === 'number' ? dl.progress : 0;
-                var stateLabel = item.state;
-                var badgeClass = 'queue-badge-' + item.state;
-                var actions = '';
-                if (item.state === 'failed') {
-                    actions += '<button class="btn btn-sm" data-queue-action="retry" data-item-id="' + Components.escapeHtml(item.id) + '">Retry</button>';
+                var row = _queueRowEls[item.id];
+                var sig = item.state + '|' + item.source + '|' + (item.name || '') + '|' + (item.error || '') + '|' + !!_cancelling[item.id];
+                if (!row || row.parentNode !== listEl || row.dataset.sig !== sig) {
+                    var fresh = _buildQueueRow(item);
+                    fresh.dataset.sig = sig;
+                    _queueRowEls[item.id] = fresh;
+                    if (row && row.parentNode === listEl) listEl.replaceChild(fresh, row);
+                    else listEl.appendChild(fresh);
+                    row = fresh;
                 }
-                actions += '<button class="btn btn-sm" data-queue-action="remove" data-item-id="' + Components.escapeHtml(item.id) + '">Remove</button>';
-                if (item.error) {
-                    actions += '<span style="font-size:11px;opacity:0.7;margin-left:6px;" title="' + Components.escapeHtml(item.error) + '">(error)</span>';
+                var fill = row.querySelector('.progress-fill');
+                if (fill) fill.style.width = Math.min(100, progress) + '%';
+                var pct = row.querySelector('.queue-pct');
+                if (pct) pct.textContent = Math.round(progress) + '%';
+            });
+            Array.prototype.slice.call(listEl.children).forEach(function(el) {
+                if (!seenIds[el.dataset.itemid]) {
+                    delete _queueRowEls[el.dataset.itemid];
+                    el.remove();
                 }
-                var row = document.createElement('div');
-                row.className = 'download-item';
-                row.innerHTML =
-                    '<div class="download-info" style="flex:1;">' +
-                        '<div class="download-name">' + Components.escapeHtml(item.name || ('App ' + item.app_id)) +
-                        ' <span class="queue-state-badge ' + badgeClass + '">' + Components.escapeHtml(stateLabel) + '</span>' +
-                        ' <span style="font-size:11px;opacity:0.65;">via ' + Components.escapeHtml(item.source) + '</span></div>' +
-                        '<div class="progress-bar" style="margin-top:4px;"><div class="progress-fill" style="width:' + Math.min(100, progress) + '%"></div></div>' +
-                        '<div style="font-size:11px;opacity:0.6;">' + Math.round(progress) + '%</div>' +
-                    '</div>' +
-                    '<div class="download-actions" style="display:flex;gap:6px;align-items:center;">' + actions + '</div>';
-                listEl.appendChild(row);
             });
         }
         if (emptyEl) emptyEl.classList.toggle('hidden', items.length > 0);

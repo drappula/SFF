@@ -142,6 +142,7 @@ from sff.gui.bridges.misc_bridge import (
     _bridge_import_depot_manifest_html,
     _bridge_import_settings_file,
     _bridge_install_lumacore,
+    _bridge_is_steamos,
     _bridge_launch_game,
     _bridge_let_updates_add_game,
     _bridge_let_updates_apply,
@@ -160,6 +161,7 @@ from sff.gui.bridges.misc_bridge import (
     _bridge_open_lua_file_dialog,
     _bridge_open_manifest_folder_dialog,
     _bridge_open_url,
+    _bridge_patch_gaming_mode,
     _bridge_provider_contribute_preview,
     _bridge_provider_contribute_submit,
     _bridge_provider_reset_submitted,
@@ -192,6 +194,7 @@ from sff.gui.bridges.misc_bridge import (
 )
 from sff.gui.bridges.store_bridge import (
     _bridge_connect_store,
+    _bridge_get_cover_urls,
     _bridge_get_game_platforms,
     _bridge_refresh_store_metadata,
     _bridge_search_games,
@@ -530,6 +533,7 @@ class WebBridge(QObject):
         self._hubcap_check_timer.start()
         self._workers = []  # prevent GC of running workers
         self._threads = []  # prevent GC of running QThreads
+        self._pending_deletes = {}  # app_id -> True: wipe files once engine stops
         # 6.2.5: per-app update-available state cache. Populated by
         # check_game_update() on success. The badge/popover code
         # reads through get_game_update_state(). Keys are str(app_id).
@@ -675,6 +679,10 @@ class WebBridge(QObject):
             try:
                 from sff.game import download_queue as _dq
                 _dq.mark_finished(str(extra["app_id"]), bool(success), message or "")
+                # Engine has stopped writing now; safe to wipe a cancelled
+                # download's files.
+                if self._pending_deletes.pop(str(extra["app_id"]), None):
+                    self._delete_queue_app_files(str(extra["app_id"]))
                 self._advance_download_queue()
             except Exception:
                 pass
@@ -855,6 +863,9 @@ class WebBridge(QObject):
     @pyqtSlot(str, result=str)
     def get_game_platforms(self, app_id):
         return _bridge_get_game_platforms(self, app_id)
+    @pyqtSlot(str, result=str)
+    def get_cover_urls(self, app_ids_json):
+        return _bridge_get_cover_urls(self, app_ids_json)
     @pyqtSlot(str, bool)
     def fetch_depot_history(self, app_id, force_refresh):
         return _bridge_fetch_depot_history(self, app_id, force_refresh)
@@ -1273,9 +1284,9 @@ class WebBridge(QObject):
     @pyqtSlot(str, str)
     def download_dlc_oureveryday(self, dlc_appid, parent_appid):
         return _bridge_download_dlc_oureveryday(self, dlc_appid, parent_appid)
-    @pyqtSlot(str, str, str)
-    def download_game_version(self, app_id, manifest_override_json, source='oureveryday'):
-        return _bridge_download_game_version(self, app_id, manifest_override_json, source)
+    @pyqtSlot(str, str, str, str)
+    def download_game_version(self, app_id, manifest_override_json, source='oureveryday', build_id=''):
+        return _bridge_download_game_version(self, app_id, manifest_override_json, source, build_id)
     @pyqtSlot(str, str, str)
     def download_game_version_native(self, app_id, manifest_override_json, source='oureveryday'):
         return _bridge_download_game_version_native(self, app_id, manifest_override_json, source)
@@ -1834,6 +1845,55 @@ class WebBridge(QObject):
         finally:
             self._emit_download_queue_state()
 
+    @pyqtSlot(str, bool)
+    def download_cancel_active(self, app_id, delete_files):
+        """Cancel a running download that isn't in the queue (started
+        directly from the Store tab). The engines poll is_cancelled(app_id)."""
+        from sff.game import download_queue as _dq
+        _dq.request_cancel(app_id)
+        if delete_files:
+            self._pending_deletes[str(app_id)] = True
+
+    @pyqtSlot(str, bool)
+    def download_queue_cancel(self, item_id, delete_files):
+        """Cancel a queue item. delete_files=True also wipes the game folder
+        once the engine has stopped writing (deferred to task_finished)."""
+        try:
+            from sff.game import download_queue as _dq
+            item = _dq.cancel_item(item_id)
+            if item and delete_files:
+                if item.get("state") == _dq.STATE_DOWNLOADING:
+                    self._pending_deletes[str(item["app_id"])] = True
+                else:
+                    # Queued item: engine never touched it, delete now.
+                    self._delete_queue_app_files(str(item["app_id"]))
+        finally:
+            self._emit_download_queue_state()
+
+    def _delete_queue_app_files(self, app_id):
+        """Full removal of a cancelled queue download: Lua + ACF + folder.
+        Resolves the game folder from the ACF first (delete_game needs the
+        path to rmtree it)."""
+        try:
+            from pathlib import Path as _P
+            from sff.core.storage.vdf import get_steam_libs
+            game_path = ""
+            if self._steam_path:
+                for lib in get_steam_libs(self._steam_path):
+                    acf = lib / "steamapps" / f"appmanifest_{app_id}.acf"
+                    if not acf.exists():
+                        continue
+                    for line in acf.read_text(encoding="utf-8", errors="replace").splitlines():
+                        if '"installdir"' in line:
+                            installdir = line.split('"')[-2]
+                            game_path = str(lib / "steamapps" / "common" / installdir)
+                            break
+                    break
+            from sff.gui.bridges.misc_bridge import _bridge_delete_game
+            _bridge_delete_game(self, app_id, game_path, "full")
+        except Exception as e:
+            logger.warning("queue cancel delete failed for %s: %s", app_id, e)
+
     @pyqtSlot(str)
     def download_queue_retry(self, item_id):
         try:
@@ -2117,6 +2177,12 @@ class WebBridge(QObject):
     @pyqtSlot()
     def fix_slssteam_hash(self):
         return _bridge_fix_slssteam_hash(self)
+    @pyqtSlot()
+    def patch_gaming_mode(self):
+        return _bridge_patch_gaming_mode(self)
+    @pyqtSlot(result=str)
+    def is_steamos(self):
+        return _bridge_is_steamos(self)
     @pyqtSlot(str, result=str)
     def get_webui_translations(self, lang):
         return _bridge_get_webui_translations(self, lang)

@@ -90,10 +90,10 @@ class ACFWriter:
         do_write_acf = True
         if acf_file.exists():
             do_write_acf = not prompt_confirm(
-                ".acf file found. Are you updating a game you already have installed"
-                " or is this a new installation?",
-                true_msg="Update",
-                false_msg="New",
+                f"An existing install of this game was found (appmanifest_{lua.app_id}.acf)."
+                "\n\nIs this a fresh installation of the game?",
+                true_msg="Fresh install",
+                false_msg="Already installed",
             )
         if do_write_acf:
             app_name = get_game_name(lua.app_id)

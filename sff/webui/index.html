@@ -504,6 +504,7 @@ start YourGame-Shipping.exe</pre>
                 </div>
                 <div class="store-options">
                     <select id="store-sort" style="display:none" data-tooltip="Sort results by criteria">
+                        <option value="popular">Popular</option>
                         <option value="updated">Recently Updated</option>
                         <option value="newest">Newest</option>
                         <option value="oldest">Oldest</option>
@@ -1542,6 +1543,10 @@ start YourGame-Shipping.exe</pre>
                         <svg class="action-icon" viewBox="0 0 24 24"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="M9 12l2 2 4-4"/></svg>
                         <span class="action-title">Fix Hash Issue</span>
                     </button>
+                    <button class="action-card compact" id="gaming-mode-patch-btn" data-action="patch_gaming_mode" style="display:none;" data-tooltip="SteamOS only: inject SLSsteam into /usr/bin/steam-jupiter so games show Play (not Purchase) in Gaming Mode. Re-run after SteamOS updates.">
+                        <svg class="action-icon" viewBox="0 0 24 24"><path d="M6 12h4"/><path d="M8 10v4"/><circle cx="15" cy="11" r="1"/><circle cx="17.5" cy="13.5" r="1"/><path d="M17.6 6H6.4a4.4 4.4 0 00-4.4 4.4v3.2a4.4 4.4 0 008 2.5l.6-.9h7.6l.6.9a4.4 4.4 0 008-2.5v-3.2A4.4 4.4 0 0017.6 6z"/></svg>
+                        <span class="action-title">Patch Gaming Mode</span>
+                    </button>
                     <button class="action-card compact" data-action="applist_menu" data-tooltip="Manage SLSsteam AdditionalApps injection IDs">
                         <svg class="action-icon" viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
                         <span class="action-title">AppList IDs</span>
@@ -1675,18 +1680,18 @@ start YourGame-Shipping.exe</pre>
                         <span class="dl-desc" id="dl-fastest-desc" data-i18n="Adds the game to Steam's library. Open Steam to download.">Adds the game to Steam's library. Open Steam to download.</span>
                     </div>
                 </button>
+                <button id="dl-ddmod" class="download-option" data-tooltip="Downloads depot content directly from Steam CDN using the built-in native downloader; falls back to DepotDownloaderMod (requires .NET 9) if a depot fails">
+                    <svg class="dl-icon" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    <div class="dl-info">
+                        <span class="dl-title">Native download (DDMod fallback)</span>
+                        <span class="dl-desc">Downloads directly from Steam CDN. Falls back to DepotDownloaderMod if needed (requires .NET 9).</span>
+                    </div>
+                </button>
                 <button id="dl-older" class="download-option" data-tooltip="Download a specific older version of the game — choose between DepotDownloaderMod or Steam (Native)">
                     <svg class="dl-icon" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
                     <div class="dl-info">
                         <span class="dl-title">Download Older Version</span>
                         <span class="dl-desc">Pick a specific older version via DDMod or Steam (Native).</span>
-                    </div>
-                </button>
-                <button id="dl-ddmod" class="download-option" data-tooltip="Download directly using DepotDownloaderMod with depot keys from the selected source (requires .NET 9)">
-                    <svg class="dl-icon" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                    <div class="dl-info">
-                        <span class="dl-title">Direct download via DDMod</span>
-                        <span class="dl-desc">Downloads game files directly using DepotDownloaderMod with keys from the selected source (requires .NET 9)</span>
                     </div>
                 </button>
             </div>
@@ -1744,7 +1749,7 @@ start YourGame-Shipping.exe</pre>
                         <span class="dl-desc">Downloads game files directly using DDMod. Works on all platforms.</span>
                     </div>
                 </button>
-                <button id="older-method-steam" class="download-option" data-tooltip="Uses Steam to download — faster for large games">
+                <button id="older-method-steam" class="download-option platform-win" data-tooltip="Uses Steam to download — faster for large games">
                     <svg class="dl-icon" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                     <div class="dl-info">
                         <span class="dl-title">Steam (Native)</span>
@@ -1996,7 +2001,16 @@ start YourGame-Shipping.exe</pre>
                 <button class="modal-close">&times;</button>
             </div>
             <div class="modal-body">
-                <div id="version-loading" class="loading-spinner">Loading depot history...</div>
+                <div id="version-loading" class="loading-spinner">Loading version history...</div>
+                <div id="version-list" class="hidden" style="max-height:340px;overflow-y:auto;"></div>
+                <div style="display:flex;gap:6px;margin-top:8px;align-items:center;">
+                    <input id="version-id-search" type="text" placeholder="Search by Manifest GID or Build ID..." style="flex:1;font-family:monospace;font-size:12px;padding:6px 8px;">
+                    <button id="version-id-search-btn" class="btn" style="padding:6px 10px;font-size:12px;">Download</button>
+                </div>
+                <div style="text-align:right;margin-top:6px;">
+                    <button id="version-advanced-toggle" class="btn" style="padding:4px 10px;font-size:11px;opacity:0.75;">Advanced: pick depots manually</button>
+                </div>
+                <div id="version-advanced" class="hidden">
                 <div id="version-table" class="data-table hidden">
                     <table>
                         <thead><tr><th>Depot ID</th><th>Manifest ID</th><th>Date</th><th>Branch</th><th>Source</th><th>Select</th></tr></thead>
@@ -2031,10 +2045,11 @@ start YourGame-Shipping.exe</pre>
                     <textarea id="version-manual-input" rows="4" placeholder="One per line, for example:&#10;939851=2233225956230312354&#10;939852 45510479311498930" style="width:100%;box-sizing:border-box;margin-top:6px;font-family:monospace;font-size:12px;"></textarea>
                     <div style="font-size:11px;opacity:0.65;margin-top:4px;">Use this when the history list is empty or SteamDB blocks the request. Format: depot ID, then manifest GID. Import HTML lists saved SteamDB depot pages above so you can select them.</div>
                 </div>
+                </div><!-- /version-advanced -->
             </div>
             <div class="modal-footer">
                 <button id="version-download" class="btn btn-primary" disabled>Download Selected</button>
-                <button id="version-manual-download" class="btn">Download Manual IDs</button>
+                <button id="version-manual-download" class="btn" style="display:none;">Download Manual IDs</button>
                 <button class="btn modal-cancel">Cancel</button>
             </div>
         </div>
@@ -2144,6 +2159,33 @@ start YourGame-Shipping.exe</pre>
             </div>
             <div class="modal-footer">
                 <button class="btn modal-cancel" id="library-delete-cancel-footer">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cancel download modal -->
+    <div id="queue-cancel-modal" class="modal hidden">
+        <div class="modal-overlay"></div>
+        <div class="modal-content" style="max-width:440px;">
+            <div class="modal-header">
+                <h2>Cancel Download</h2>
+                <button class="modal-close" id="queue-cancel-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="margin-bottom:14px;opacity:0.9;">Cancel <strong id="queue-cancel-game-name"></strong>?</p>
+                <div style="display:flex;flex-direction:column;gap:10px;">
+                    <button id="queue-cancel-keep" class="btn btn-primary" style="text-align:left;padding:12px 16px;">
+                        <strong>Keep files</strong>
+                        <span style="display:block;font-size:12px;opacity:0.7;margin-top:3px;white-space:normal;">Stops the download. Anything already on disk stays.</span>
+                    </button>
+                    <button id="queue-cancel-delete" class="btn btn-danger" style="text-align:left;padding:12px 16px;">
+                        <strong>Remove everything</strong>
+                        <span style="display:block;font-size:12px;opacity:0.7;margin-top:3px;white-space:normal;">Stops the download and deletes all game files from disk. This cannot be undone.</span>
+                    </button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn modal-cancel" id="queue-cancel-dismiss">Do nothing</button>
             </div>
         </div>
     </div>

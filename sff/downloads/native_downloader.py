@@ -279,14 +279,81 @@ def _resolve_request_code(
 
 
 def _get_cdn_servers(cdn_client) -> list:
+    # cdn.servers is a deque of ContentServer objects (not a list of dicts),
+    # so the old isinstance(raw, list) check always failed and native fell
+    # back to one hardcoded host that 504s on most depots. Normalize to the
+    # dict shape the rest of this module reads.
     try:
-        raw = cdn_client.servers
-        if isinstance(raw, list):
-            return raw
+        raw = list(cdn_client.servers)
     except Exception:
-        pass
+        raw = []
+    out = []
+    for s in raw:
+        if isinstance(s, dict):
+            out.append(s)
+            continue
+        host = getattr(s, "host", None)
+        if not host:
+            continue
+        port = getattr(s, "port", 0) or 0
+        https = getattr(s, "https", False)
+        if not port:
+            port = 443 if https else 80
+        # fold non-standard ports into the host so every URL builder works
+        hp = f"{host}:{port}" if port not in (80, 443) else host
+        out.append({
+            "host": hp,
+            "probe_host": host,
+            "probe_port": port,
+            "https_support": "mandatory" if https else "optional",
+            "NumEntries": 1,
+        })
+    if out:
+        ranked = _probe_servers(out)
+        logger.debug(
+            "cdn: %d servers, best-first: %s",
+            len(ranked), ", ".join(s.get("host", "?") for s in ranked[:6]),
+        )
+        return ranked
     # Fallback: well-known Steam CDN host
+    logger.debug("cdn: empty server list from CM, falling back to steampipe")
     return [{"host": "steampipe.akamaized.net"}]
+
+
+def _probe_servers(servers: list) -> list:
+    # Steam's cell list is ordered by their load metrics, not by what is
+    # actually fast for this user; a stalled host at the front slows the
+    # manifest and every chunk mapped to it. Rank by TCP connect latency.
+    import socket
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _latency(s):
+        # TCP connect is not enough: hosts that accept then stall on reads
+        # (steampipe.akamaized.net) win a connect-only probe. Any HTTP
+        # response, even 404 for the fake chunk id, proves the host serves.
+        host = s.get("probe_host") or s.get("host", "").split(":")[0]
+        port = s.get("probe_port") or 80
+        scheme = "https" if s.get("https_support") == "mandatory" else "http"
+        url = f"{scheme}://{host}:{port}/depot/0/chunk/{'0' * 40}"
+        best = None
+        for _ in range(2):
+            t0 = time.monotonic()
+            try:
+                httpx.get(url, timeout=2.5, follow_redirects=True)
+                dt = time.monotonic() - t0
+                best = dt if best is None else min(best, dt)
+            except Exception:
+                continue
+        return best if best is not None else float("inf")
+
+    try:
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            lat = list(ex.map(_latency, servers))
+    except Exception:
+        return servers
+    order = sorted(range(len(servers)), key=lambda i: lat[i])
+    return [servers[i] for i in order]
 
 
 def _download_file(url: str, timeout: float = _CDN_TIMEOUT) -> bytes | None:
@@ -501,6 +568,12 @@ def download_depot(
         return True, total_size
 
     # ── Server pool (sorted by load preference) ───────────
+    # _probe_servers already ranked these best-first. Round-robin below
+    # spreads chunks evenly across the pool, so including every server
+    # means ~1/N of chunks land on a slow host and dominate wall-clock
+    # (a 54 GB depot crawled at 53 KB/s while DDMod hit 12 MB/s on the
+    # same list). Keep only the top few; the retry loop still rotates to
+    # the rest if a top host fails.
     server_hosts: list[str] = []
     for s in servers:
         host = s.get("host", "") if isinstance(s, dict) else str(s)
@@ -511,6 +584,12 @@ def download_depot(
             server_hosts.append(host)
     if not server_hosts:
         server_hosts = ["steampipe.akamaized.net"]
+    _all_hosts = server_hosts
+    server_hosts = server_hosts[:4]
+    logger.debug(
+        "cdn pool: %d hosts available, using top %d: %s",
+        len(_all_hosts), len(server_hosts), ", ".join(server_hosts),
+    )
 
     host_for_chunk: dict[str, str] = {}
     host_idx = 0
@@ -523,7 +602,9 @@ def download_depot(
     import threading
 
     http_client = httpx.Client(
-        timeout=httpx.Timeout(connect=30.0, read=60.0, write=30.0, pool=30.0),
+        # read=15s: a stalled CDN connection must fail over to the next
+        # server quickly, or all 32 workers hang and the UI freezes.
+        timeout=httpx.Timeout(connect=15.0, read=15.0, write=15.0, pool=15.0),
         limits=httpx.Limits(max_keepalive_connections=64, max_connections=128),
         follow_redirects=True,
     )
@@ -532,11 +613,35 @@ def download_depot(
     total_done = [0]
     total_bytes = [0]
     fatal_error = [None]
+    _stop = threading.Event()
+
+    def _abort():
+        # Unblock every worker fast: the flag breaks the retry loop and the
+        # interruptible sleeps, and closing the client raises in any thread
+        # blocked on a read. Without this, the executor's implicit
+        # shutdown(wait=True) hangs on stalled CDN connections and DDMod
+        # never takes over.
+        _stop.set()
+        try:
+            http_client.close()
+        except Exception:
+            pass
+
+    def _cancelled():
+        if _stop.is_set():
+            return True
+        try:
+            from sff.game import download_queue as _dq
+            return _dq.is_cancelled(app_id)
+        except Exception:
+            return False
 
     def _download_one_chunk(sha: str, offset: int, cb_original: int, fpath: Path) -> int:
         """Downloads one chunk. Returns bytes written or -1 on failure."""
         if fatal_error[0] is not None:
             return -1
+        if _cancelled():
+            return -2
 
         host = host_for_chunk.get(sha, server_hosts[0])
         use_https = any(
@@ -547,9 +652,11 @@ def download_depot(
 
         chunk_data = None
         for retry in range(_CHUNK_RETRIES):
+            if _stop.is_set():
+                return -2
             cur_host = server_hosts[(server_hosts.index(host) + retry) % len(server_hosts)]
-            if retry > 0:
-                time.sleep(min(0.25 * (2 ** retry), 15.0))
+            if retry > 0 and _stop.wait(min(0.25 * (2 ** retry), 15.0)):
+                return -2
             url = f"{scheme}://{cur_host}/depot/{depot_id}/chunk/{sha}{auth_token}"
             try:
                 resp = http_client.get(url)
@@ -601,43 +708,85 @@ def download_depot(
             futures[fut] = sha
 
         total = len(pending)
-        _dl_start = time.monotonic()
-        _last_prog_t = 0.0
-        for fut in concurrent.futures.as_completed(futures):
-            sha = futures[fut]
-            try:
-                result = fut.result()
-            except Exception:
-                result = -1
+        _last_prog_t = [0.0]
+        _ema_speed = [0.0]
+        _prog_start = [0.0]
 
-            if result < 0:
-                # Retry once on a different server
-                sha2, off2, cb2, fp2 = next(
-                    (s, o, c, p) for s, o, c, p in pending if s == sha
-                )
-                result = _download_one_chunk(sha2, off2, cb2, fp2)
-
-            if result < 0:
-                http_client.close()
-                client.disconnect()
-                print_fn(f"[native] Failed chunk {sha[:16]}... ({total_done[0]}/{total} done)")
-                return False, total_bytes[0]
-
-            pct = (total_done[0] / total) * 100
-            # UI progress line: time-gated (~2/sec), NOT chunk-gated, so a
-            # slow chunk cadence doesn't freeze the bar between depots.
+        def _emit_prog(force=False):
+            # Heartbeat-driven, NOT chunk-gated: when all workers stall on
+            # slow CDN connections no chunk completes, and a chunk-gated
+            # line freezes the UI for minutes. Speed is an EMA of the
+            # last-second rate so it reflects what's happening now, not
+            # the average since start (a cached-chunk burst once showed
+            # 129 MB/s on a 6 MB/s line).
             _now = time.monotonic()
-            if _now - _last_prog_t >= 0.5 or total_done[0] == total:
-                _last_prog_t = _now
-                _speed = total_bytes[0] / max(_now - _dl_start, 0.001)
-                print_fn(
-                    f"[PROG] {pct:.1f}% | {total_bytes[0]}/{pending_bytes} bytes | {_speed:.0f} B/s"
-                )
-            if total_done[0] % 100 == 0 or total_done[0] == total:
-                print_fn(f"\r[native] {total_done[0]}/{total} chunks ({pct:.0f}%) | {skipped} cached | {total_bytes[0]:,} B")
+            if not force and _now - _last_prog_t[0] < 1.0:
+                return
+            dt = _now - _last_prog_t[0] if _last_prog_t[0] else 0
+            if not _prog_start[0]:
+                _prog_start[0] = _now
+            with done_lock:
+                b = total_bytes[0]
+                d = total_done[0]
+            if _last_prog_t[0] and dt > 0:
+                inst = max(b - _last_prog_b[0], 0) / dt
+                _ema_speed[0] = _ema_speed[0] * 0.6 + inst * 0.4 if _ema_speed[0] else inst
+            _last_prog_b[0] = b
+            _last_prog_t[0] = _now
+            # First 10s: 32 connections all filling their TCP windows at once
+            # makes the instantaneous rate read ~3x the real line speed (the
+            # burst lasts ~200 MB). Report the honest average until it drains.
+            speed = _ema_speed[0]
+            if _now - _prog_start[0] < 10.0 and _now > _prog_start[0]:
+                speed = b / (_now - _prog_start[0])
+            pct = (d / total) * 100 if total else 100.0
+            print_fn(
+                f"[PROG] {pct:.1f}% | {b}/{pending_bytes} bytes | {speed:.0f} B/s"
+            )
 
-    http_client.close()
-    client.disconnect()
+        _last_prog_b = [0]
+        _hb_stop = threading.Event()
+
+        def _heartbeat():
+            while not _hb_stop.wait(1.0):
+                _emit_prog()
+
+        _hb_t = threading.Thread(target=_heartbeat, daemon=True)
+        _hb_t.start()
+        try:
+            for fut in concurrent.futures.as_completed(futures):
+                if _cancelled():
+                    return False, total_bytes[0]
+                sha = futures[fut]
+                try:
+                    result = fut.result()
+                except Exception:
+                    result = -1
+
+                if result == -2:
+                    continue
+                if result < 0:
+                    # Retry once on a different server
+                    sha2, off2, cb2, fp2 = next(
+                        (s, o, c, p) for s, o, c, p in pending if s == sha
+                    )
+                    result = _download_one_chunk(sha2, off2, cb2, fp2)
+
+                if _cancelled():
+                    return False, total_bytes[0]
+                if result < 0:
+                    print_fn(f"[native] Failed chunk {sha[:16]}... ({total_done[0]}/{total} done)")
+                    return False, total_bytes[0]
+
+                if total_done[0] == total:
+                    _emit_prog(force=True)
+        finally:
+            _hb_stop.set()
+            # Unblock stalled workers so the executor's implicit
+            # shutdown(wait=True) returns and DDMod can take over now,
+            # not after every worker exhausts its retries.
+            _abort()
+            client.disconnect()
 
     print_fn(f"[native] Depot {depot_id} done: {total_bytes[0]:,} bytes ({skipped} cached, {total} downloaded)")
     return True, total_bytes[0]

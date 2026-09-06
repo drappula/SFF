@@ -937,11 +937,82 @@ def _bridge_download_dlc_oureveryday(bridge, dlc_appid, parent_appid):
 
 # ── Version download ──────────────────────────────────────────────────
 
-def _bridge_download_game_version(bridge, app_id, manifest_override_json, source='oureveryday'):
+def _make_run_download_print_fn(bridge, app_id, game_name, selected_depots, floor=35.0, ceil=95.0):
+    """print_fn for run_download that turns the engines' depot markers and
+    [PROG] lines into download_progress events, so the Downloads tab shows
+    the same "Downloading depot X... A / B (C/s)" rows as a normal download.
+    Each depot gets an equal slice of the floor-ceil progress range."""
+    import time as _t
+    _span = ceil - floor
+    n = max(len(selected_depots), 1)
+    _seen = []
+    _last_emit = [0.0]
+    _last_pct = [-1.0]
+
+    def _emit(status, pct):
+        bridge.download_progress.emit(json.dumps({
+            "app_id": app_id, "name": game_name,
+            "status": status, "progress": max(0, min(100, int(pct))),
+        }))
+
+    def _print_fn(msg):
+        clean = _ANSI_RE.sub('', str(msg)).strip()
+        if not clean:
+            return
+        dm = re.match(r"^--- Downloading depot (\d+)", clean)
+        if dm:
+            dep = dm.group(1)
+            if dep not in _seen:
+                _seen.append(dep)
+            _last_pct[0] = -1.0
+            logger.debug("version-dl: depot %s started (%d/%d)", dep, len(_seen), n)
+            _emit(f"Downloading depot {dep}...", floor + (_seen.index(dep) / n) * _span)
+            return
+        prog = _PROG_RE.match(clean)
+        if prog and _seen:
+            dep = _seen[-1]
+            raw = float(prog.group(1))
+            base = floor + (_seen.index(dep) / n) * _span
+            now = _t.monotonic()
+            if raw < 99.5 and now - _last_emit[0] < 1.0:
+                return
+            _last_emit[0] = now
+            _last_pct[0] = raw
+            _emit(
+                f"Downloading depot {dep}... {_fmt_bytes(int(prog.group(2)))}"
+                f" / {_fmt_bytes(int(prog.group(3)))} ({_fmt_bytes(int(prog.group(4)))}/s)",
+                base + (raw / 100.0) * (_span / n),
+            )
+            return
+        # DDMod (the backup engine) prints "NN% <file path>" per-depot lines
+        # instead of the native engine's byte-carrying [PROG] lines. Without
+        # this the UI froze at the last native percent while DDMod downloaded.
+        pct = _DDMOD_PCT_FILE_RE.match(clean) or _DDMOD_PCT_RE.match(clean)
+        if pct and _seen:
+            dep = _seen[-1]
+            raw = float(pct.group(1))
+            base = floor + (_seen.index(dep) / n) * _span
+            now = _t.monotonic()
+            if raw < 99.5 and now - _last_emit[0] < 1.0:
+                return
+            _last_emit[0] = now
+            _last_pct[0] = raw
+            _emit(
+                f"Downloading depot {dep}... ({raw:.1f}%)",
+                base + (raw / 100.0) * (_span / n),
+            )
+            return
+        logger.debug("build-downgrade: %s", clean)
+    return _print_fn
+
+
+def _bridge_download_game_version(bridge, app_id, manifest_override_json, source='oureveryday', build_id=''):
     """Download specific version via process_from_store().
     Emits download_progress + task_finished signals."""
     if not app_id or not app_id.strip().isdigit():
         return
+    _name_box = [f"App {app_id}"]
+
     def _do():
         try:
             manifest_override = json.loads(manifest_override_json)
@@ -951,8 +1022,21 @@ def _bridge_download_game_version(bridge, app_id, manifest_override_json, source
         if not manifest_override:
             return False
 
+        try:
+            from sff.game_list_fallback import get_app_name
+            _name_box[0] = get_app_name(app_id) or _name_box[0]
+        except Exception:
+            pass
+        game_name = _name_box[0]
+        logger.debug(
+            "download_game_version: app %s name=%s depots=%s lib=%s",
+            app_id, game_name, sorted(manifest_override),
+            bridge._active_library or bridge._steam_path,
+        )
+
         bridge.download_progress.emit(json.dumps({
-            "app_id": app_id, "status": "Starting version download", "progress": 10
+            "app_id": app_id, "name": game_name,
+            "status": "Starting version download", "progress": 10
         }))
 
         from pathlib import Path as _Path
@@ -960,19 +1044,103 @@ def _bridge_download_game_version(bridge, app_id, manifest_override_json, source
         lib_override = _Path(bridge._active_library) if bridge._active_library else bridge._steam_path
         src_map = {"hubcap": LuaEndpoint.HUBCAP, "ryuu": LuaEndpoint.RYUU, "oureveryday": LuaEndpoint.OUREVERYDAY, "depotbox": LuaEndpoint.DEPOTBOX}
         selected = src_map.get(source, LuaEndpoint.HUBCAP if bridge._api_key else LuaEndpoint.OUREVERYDAY)
+
+        # process_from_store prints everything to stdout with no progress
+        # hooks. Scrape the same lines the DDMod flow's _print_fn handles so
+        # the Downloads tab gets identical "Downloading depot X... A / B" rows
+        # instead of freezing at 10% until the whole thing finishes.
+        import io
+        import time as _t
+
+        # Each selected depot gets an equal slice of the 15-90 range.
+        _n_depots = max(len(manifest_override), 1)
+        _span = 75.0 / _n_depots
+        _seen_depots = []
+
+        def _emit(status, pct):
+            bridge.download_progress.emit(json.dumps({
+                "app_id": app_id, "name": game_name,
+                "status": status, "progress": max(0, min(100, int(pct))),
+            }))
+
+        def _scrape(line):
+            clean = _ANSI_RE.sub('', line).strip()
+            if not clean:
+                return
+            dm = re.match(r"^--- Downloading depot (\d+)", clean)
+            if dm:
+                dep = dm.group(1)
+                if dep not in _seen_depots:
+                    _seen_depots.append(dep)
+                base = 15 + _seen_depots.index(dep) * _span
+                _emit(f"Downloading depot {dep}...", base)
+                return
+            prog = _PROG_RE.match(clean)
+            if prog and _seen_depots:
+                dep = _seen_depots[-1]
+                raw = float(prog.group(1))
+                base = 15 + _seen_depots.index(dep) * _span
+                now = _t.monotonic()
+                if raw < 99.5 and now - _last_prog[0] < 1.0:
+                    return
+                _last_prog[0] = now
+                status = (
+                    f"Downloading depot {dep}... {_fmt_bytes(int(prog.group(2)))}"
+                    f" / {_fmt_bytes(int(prog.group(3)))} ({_fmt_bytes(int(prog.group(4)))}/s)"
+                )
+                _emit(status, base + (raw / 100.0) * _span)
+                return
+            # DDMod backup engine prints "NN% <file>" without byte counts.
+            pct = _DDMOD_PCT_FILE_RE.match(clean) or _DDMOD_PCT_RE.match(clean)
+            if pct and _seen_depots:
+                dep = _seen_depots[-1]
+                raw = float(pct.group(1))
+                base = 15 + _seen_depots.index(dep) * _span
+                now = _t.monotonic()
+                if raw < 99.5 and now - _last_prog[0] < 1.0:
+                    return
+                _last_prog[0] = now
+                _emit(f"Downloading depot {dep}... ({raw:.1f}%)", base + (raw / 100.0) * _span)
+                return
+            if clean.startswith("Adding Decryption Keys"):
+                _emit("Adding decryption keys...", 12)
+            elif clean.startswith("Pre-downloading manifests"):
+                _emit("Downloading manifests...", 13)
+
+        _last_prog = [0.0]
+
+        class _VersionStream(io.StringIO):
+            _buf = ""
+            def write(self, s):
+                self._buf += s
+                while "\n" in self._buf:
+                    line, self._buf = self._buf.split("\n", 1)
+                    if line.strip():
+                        _scrape(line)
+                return len(s)
+            def flush(self):
+                if self._buf.strip():
+                    _scrape(self._buf)
+                    self._buf = ""
+
+        old_stdout = sys.stdout
         try:
+            sys.stdout = _VersionStream()
             bridge._ui.process_from_store(
                 app_id=app_id,
                 manifest_override=manifest_override,
                 use_hubcap=(selected == LuaEndpoint.HUBCAP),
                 lib_path=lib_override,
+                build_id_override=str(build_id or ""),
             )
         except Exception:
             logger.exception("download_game_version: process_from_store failed for %s", app_id)
             return False
+        finally:
+            sys.stdout = old_stdout
 
         bridge.download_progress.emit(json.dumps({
-            "app_id": app_id, "status": "Complete", "progress": 100
+            "app_id": app_id, "name": game_name, "status": "Complete", "progress": 100
         }))
         return True
 
@@ -981,7 +1149,7 @@ def _bridge_download_game_version(bridge, app_id, manifest_override_json, source
         bridge._emit_task_result(
             "download_version",
             success,
-            f"Version download {'completed' if success else 'failed'} for App {app_id}",
+            f"Version download {'completed' if success else 'failed'} for {_name_box[0]}",
             app_id=app_id,
         )
 
@@ -1240,9 +1408,6 @@ def _bridge_download_game_version_native(bridge, app_id, manifest_override_json,
 
 
 def _bridge_download_older_version_auto(bridge, app_id, build_id):
-    if sys.platform != "win32":
-        bridge._emit_task_result("download_older_auto", False, "Downgrade is Windows-only.", app_id=app_id)
-        return
     if not app_id or not app_id.strip().isdigit():
         bridge._emit_task_result("download_older_auto", False, f"Invalid App ID: '{app_id}'", app_id=app_id)
         return
@@ -1264,21 +1429,53 @@ def _bridge_download_older_version_auto(bridge, app_id, build_id):
             }))
             return False
 
+        try:
+            from sff.game_list_fallback import get_app_name as _fallback_name
+            game_name = _fallback_name(app_id) or f"App {app_id}"
+        except Exception:
+            game_name = f"App {app_id}"
+        logger.debug(
+            "build-downgrade: app %s build %s name=%s lib=%s",
+            app_id, build_id, game_name,
+            bridge._active_library or steam_path,
+        )
+
         lua_path = Path(steam_path) / "config" / "stplug-in" / f"{app_id}.lua"
         if not lua_path.exists():
+            # No prior install: fetch the game's lua fresh so the build can
+            # still be pinned. Same source as a normal download.
             bridge.download_progress.emit(json.dumps({
-                "app_id": app_id, "status": "This game has no stplug-in Lua yet. Add the game first.",
-                "progress": 0, "error": True,
+                "app_id": app_id, "name": game_name,
+                "status": "Fetching game Lua...", "progress": 5
             }))
-            return False
+            from sff.lua.choices import download_lua_direct
+            from sff.core.structs import LuaEndpoint as _LE
+            try:
+                _src = _LE.HUBCAP if bridge._api_key else _LE.OUREVERYDAY
+                _fetched = download_lua_direct(
+                    Path(steam_path) / "config" / "stplug-in",
+                    app_id, _src, steam_path=steam_path,
+                )
+            except Exception as _fe:
+                logger.debug("download_older_version_auto: lua fetch failed: %s", _fe)
+                _fetched = None
+            if not _fetched:
+                bridge.download_progress.emit(json.dumps({
+                    "app_id": app_id, "name": game_name,
+                    "status": "Could not fetch the game's Lua. Try adding the game first.",
+                    "progress": 0, "error": True,
+                }))
+                return False
+            lua_path = Path(_fetched)
 
         bridge.download_progress.emit(json.dumps({
-            "app_id": app_id, "status": f"Looking up build {build_id}", "progress": 10
+            "app_id": app_id, "name": game_name,
+            "status": f"Looking up build {build_id}", "progress": 10
         }))
         build_pins = fetch_build_details(build_id)
         if not build_pins:
             bridge.download_progress.emit(json.dumps({
-                "app_id": app_id, "status": "Build not found. Check the Build ID.",
+                "app_id": app_id, "name": game_name, "status": "Build not found. Check the Build ID.",
                 "progress": 0, "error": True,
             }))
             return False
@@ -1288,10 +1485,20 @@ def _bridge_download_older_version_auto(bridge, app_id, build_id):
         )
         if not parsed:
             bridge.download_progress.emit(json.dumps({
-                "app_id": app_id, "status": "Could not parse the game's Lua.",
+                "app_id": app_id, "name": game_name, "status": "Could not parse the game's Lua.",
                 "progress": 0, "error": True,
             }))
             return False
+        # Provider luas sometimes list only depot addappid(N, key) lines and
+        # no keyless addappid(<app>); the parser then falls back to the depot
+        # id, which has no store entry and triggered a name prompt. The
+        # requested app_id is authoritative here.
+        if str(parsed.app_id) != str(app_id):
+            logger.debug(
+                "build-downgrade: lua parsed app_id %s != requested %s, overriding",
+                parsed.app_id, app_id,
+            )
+            parsed.app_id = app_id
 
         lua_depots = {str(pair.depot_id) for pair in parsed.depots}
         override = {depot: gid for depot, gid in build_pins.items() if depot in lua_depots}
@@ -1325,13 +1532,16 @@ def _bridge_download_older_version_auto(bridge, app_id, build_id):
                 )
                 if not parsed:
                     bridge.download_progress.emit(json.dumps({
-                        "app_id": app_id, "status": "Could not parse the game's Lua after depot cleanup.",
+                        "app_id": app_id, "name": game_name,
+                        "status": "Could not parse the game's Lua after depot cleanup.",
                         "progress": 0, "error": True,
                     }))
                     return False
+                if str(parsed.app_id) != str(app_id):
+                    parsed.app_id = app_id
 
         bridge.download_progress.emit(json.dumps({
-            "app_id": app_id, "status": f"Downloading {len(override)} manifest(s)", "progress": 35
+            "app_id": app_id, "name": game_name, "status": f"Downloading {len(override)} manifest(s)", "progress": 35
         }))
         try:
             downloader = ManifestDownloader(None, Path(steam_path))
@@ -1347,9 +1557,23 @@ def _bridge_download_older_version_auto(bridge, app_id, build_id):
             return False
 
         bridge.download_progress.emit(json.dumps({
-            "app_id": app_id, "status": "Pinning manifests in Lua", "progress": 75
+            "app_id": app_id, "name": game_name, "status": "Pinning manifests in Lua", "progress": 75
         }))
         write_manifest_pins_to_lua(lua_path, override)
+
+        # Steam locks config.vdf while running on Linux; the depot keys and
+        # ACF below need it closed. Windows uses _stop_steam_for_write in
+        # the ACF-sync section instead.
+        _steam_was_running_linux = False
+        if sys.platform.startswith("linux"):
+            try:
+                from sff.linux.steam_process import kill_steam as _kill_steam
+                from sff.core.processes import is_proc_running as _is_running
+                _steam_was_running_linux = _is_running("steam")
+                if _steam_was_running_linux:
+                    _kill_steam(print_fn=lambda _m: None)
+            except Exception:
+                pass
 
         try:
             config_writer = ConfigVDFWriter(steam_path)
@@ -1359,6 +1583,61 @@ def _bridge_download_older_version_auto(bridge, app_id, build_id):
             acf_writer.write_acf(parsed, manifest_override=override, buildid=str(build_id))
         except Exception as exc:
             logger.debug("download_older_version_auto: acf/config write skipped: %s", exc)
+
+        # Without SLSSteam ownership Steam shows "Purchase" instead of
+        # "Play" — same registration a normal download performs.
+        try:
+            sls_man = getattr(bridge._ui, "sls_man", None)
+            if sls_man:
+                sls_man.add_ids(parsed)
+                sls_man.dlc_check(bridge._ui.provider, int(app_id), auto_add_depot_dlcs=True)
+                logger.debug("build-downgrade: SLSSteam registered app %s", app_id)
+            from sff.linux.slssteam import detect_steam_type, patch_slssteam_config
+            patch_slssteam_config(detect_steam_type(), lambda _m: None)
+        except Exception as exc:
+            logger.debug("download_older_version_auto: SLSSteam registration skipped: %s", exc)
+
+        # Download the older build's content fresh — the pinned lua + ACF
+        # alone rely on Steam's own updater, which stalls when the appid is
+        # not properly queued. Same engine chain as a normal download.
+        bridge.download_progress.emit(json.dumps({
+            "app_id": app_id, "name": game_name, "status": "Downloading older build files", "progress": 78
+        }))
+        try:
+            from sff.downloads.depot_downloader import run_download, filter_depots_by_os, resolve_target_os
+            from sff.game_list_fallback import get_app_name as _cover_name
+            from pathvalidate import sanitize_filename as _sanitize
+            lib_dir = Path(bridge._active_library) if bridge._active_library else Path(steam_path)
+            _name = _cover_name(app_id) or f"App {app_id}"
+            _installdir = _sanitize(_name).replace("'", "").strip() or str(app_id)
+            _depots = {
+                str(dp.depot_id): {"key": dp.decryption_key}
+                for dp in parsed.depots if dp.decryption_key
+            }
+            _game_data = {
+                "appid": str(app_id),
+                "depots": _depots,
+                "manifests": dict(override),
+                "installdir": _installdir,
+            }
+            _selected = [str(d) for d in override if d in _depots]
+            try:
+                _target_os = resolve_target_os(_selected, None, print_fn=lambda _m: None)
+                _selected = filter_depots_by_os(_selected, None, print_fn=lambda _m: None, os_name=_target_os)
+            except Exception:
+                _target_os = None
+            if _selected:
+                _ok, _size = run_download(
+                    _game_data, _selected, lib_dir, Path(steam_path),
+                    print_fn=_make_run_download_print_fn(
+                        bridge, app_id, game_name, _selected, floor=78.0, ceil=95.0
+                    ),
+                    os_name=_target_os,
+                )
+                if not _ok:
+                    logger.warning("download_older_version_auto: content download failed for %s", app_id)
+        except Exception:
+            logger.exception("download_older_version_auto: fresh content download crashed for %s", app_id)
 
         try:
             os.utime(lua_path, None)
@@ -1385,7 +1664,7 @@ def _bridge_download_older_version_auto(bridge, app_id, build_id):
                 _flags = 0
             if _flags & 4:
                 bridge.download_progress.emit(json.dumps({
-                    "app_id": app_id, "status": "Updating Steam properties", "progress": 88
+                    "app_id": app_id, "name": game_name, "status": "Updating Steam properties", "progress": 88
                 }))
                 _steam_was_running = _stop_steam_for_write(steam_path)
                 applied_now = _sync_acf_downgrade(acf_path, str(build_id), override)
@@ -1399,13 +1678,14 @@ def _bridge_download_older_version_auto(bridge, app_id, build_id):
             status = f"Done — pinned build {build_id}, ACF updated, and reloaded live."
         else:
             enqueue_acf_edit(app_id, str(build_id), override)
+            logger.debug("build-downgrade: ACF queued for app %s (not writable yet)", app_id)
             status = (
                 f"Done — pinned build {build_id} and reloaded live. "
                 "The ACF (build ID in Steam) will be updated automatically "
                 "once the game is fully downloaded."
             )
         bridge.download_progress.emit(json.dumps({
-            "app_id": app_id, "status": status, "progress": 100
+            "app_id": app_id, "name": game_name, "status": status, "progress": 100
         }))
         return True
 
@@ -1917,6 +2197,8 @@ def _bridge_download_game_ddmod(bridge, app_id, source, lua_path, manifest_folde
             _DDMOD_FLOOR = 35.0
             _DDMOD_CEIL = 100.0
             _last_pct = [-1.0]
+            _last_emit = [0.0]  # monotonic of last download_progress emit
+            _validating = [False]
 
             # Each depot gets an equal slice of the 35-100 range so the bar
             # climbs monotonically across all depots instead of hitting 100%
@@ -2020,9 +2302,27 @@ def _bridge_download_game_ddmod(bridge, app_id, source, lua_path, manifest_folde
                 if _dm:
                     _cur_depot[0] = _dm.group(1)
                     _last_pct[0] = -1.0
+                    _validating[0] = False
                     _ddmod_last[0] = now
                     _ddmod_last[1] = 0
                     _ddmod_last[2] = 0.0
+
+                # DDMod validates existing files before downloading; its
+                # "Validating <path>" lines carry no percent, so surface a
+                # status instead of leaving the last download line frozen.
+                if clean.startswith("Validating "):
+                    if not _validating[0]:
+                        _validating[0] = True
+                        try:
+                            bridge.download_progress.emit(json.dumps({
+                                "app_id": app_id,
+                                "name": game_name or f"App {app_id}",
+                                "status": "Validating existing files...",
+                                "progress": int(_last_pct[0]) if _last_pct[0] >= 0 else 0,
+                            }))
+                        except Exception:
+                            pass
+                    return
 
                 # Native downloader's structured progress line carries
                 # bytes and speed, which DDMod's bare "NN%" lines don't.
@@ -2034,8 +2334,11 @@ def _bridge_download_game_ddmod(bridge, app_id, source, lua_path, manifest_folde
                     speed = int(prog_match.group(4))
                     mapped = _map_progress(_cur_depot[0], raw)
                     mapped_int = int(mapped)
-                    if mapped_int != int(_last_pct[0]):
+                    # Percent-gated alone, a slow depot (369 KB/s on 54 GB =
+                    # ~25 min per percent) looks frozen. Also emit every 2 s.
+                    if mapped_int != int(_last_pct[0]) or now - _last_emit[0] >= 2.0:
                         _last_pct[0] = mapped
+                        _last_emit[0] = now
                         _lbl = _depot_label(_cur_depot[0]) if _cur_depot[0] else ""
                         status = (
                             f"Downloading {_lbl}... {_fmt_bytes(done_b)} / {_fmt_bytes(total_b)}"

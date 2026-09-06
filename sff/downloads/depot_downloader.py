@@ -138,7 +138,7 @@ def _copy_manifests_to_temp(steam_path: Path, manifests: dict) -> None:
                 shutil.copy2(src, dst)
 
 
-def _read_process_output(proc: subprocess.Popen, print_fn, depot_timeout: float | None = None) -> None:
+def _read_process_output(proc: subprocess.Popen, print_fn, depot_timeout: float | None = None, cancel_check=None) -> None:
     """Read subprocess stdout with an optional per-depot timeout (in seconds).
 
     Spawns a reader thread so a hanging DDMod process doesn't freeze the
@@ -161,11 +161,34 @@ def _read_process_output(proc: subprocess.Popen, print_fn, depot_timeout: float 
     _stop = _t.Event()
 
     def _reader():
+        # DDMod writes per-file progress with '\r' (no newline until the
+        # file completes), so iterating stdout lines would go silent for
+        # the entire download phase. Split on both terminators.
+        import select as _sel
         try:
-            for raw_line in proc.stdout:
-                if _stop.is_set():
+            buf = b""
+            fd = proc.stdout.fileno()
+            while not _stop.is_set():
+                if _sel.select([fd], [], [], 0.5)[0]:
+                    chunk = os.read(fd, 4096)
+                    if not chunk:
+                        break
+                    buf += chunk
+                    while True:
+                        i_n = buf.find(b"\n")
+                        i_r = buf.find(b"\r")
+                        if i_n < 0 and i_r < 0:
+                            break
+                        if i_r >= 0 and (i_n < 0 or i_r < i_n):
+                            cut, keep = i_r, i_r + 1
+                        else:
+                            cut, keep = i_n, i_n + 1
+                        _lineq.put(buf[:cut] + b"\n")
+                        buf = buf[keep:]
+                elif proc.poll() is not None:
                     break
-                _lineq.put(raw_line)
+            if buf:
+                _lineq.put(buf if buf.endswith(b"\n") else buf + b"\n")
         except ValueError:
             pass
         finally:
@@ -176,6 +199,11 @@ def _read_process_output(proc: subprocess.Popen, print_fn, depot_timeout: float 
 
     deadline = None if depot_timeout is None else (time.monotonic() + depot_timeout)
     while True:
+        if cancel_check and cancel_check():
+            print_fn(Fore.YELLOW + "\n[cancelled] Killing depot process" + Style.RESET_ALL)
+            _stop.set()
+            proc.kill()
+            break
         if deadline is not None:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -338,11 +366,21 @@ def run_download(
             pass
         return False, 0
 
+    def _cancelled():
+        try:
+            from sff.game import download_queue as _dq
+            return _dq.is_cancelled(appid)
+        except Exception:
+            return False
+
     native_failed: list = []
     try:
         from sff.downloads.native_downloader import download_depot as _native_dl
         print_fn(Fore.CYAN + "\n[Native] Starting Steam CDN download (no .NET required)" + Style.RESET_ALL)
         for depot_id in selected_depots:
+            if _cancelled():
+                print_fn(Fore.YELLOW + "\n[cancelled] Stopping download" + Style.RESET_ALL)
+                return False, 0
             depot_id_str = str(depot_id)
             manifest_id = manifests.get(depot_id_str)
             key_data = depots.get(depot_id_str, {})
@@ -434,6 +472,9 @@ def run_download(
     target_os = (os_name or ("linux" if sys.platform.startswith("linux") else "windows")).lower()
 
     for i, depot_id in enumerate(ddmod_depots):
+        if _cancelled():
+            print_fn(Fore.YELLOW + "\n[cancelled] Stopping download" + Style.RESET_ALL)
+            return False, 0
         depot_id_str = str(depot_id)
         manifest_id = manifests.get(depot_id_str)
 
@@ -509,7 +550,9 @@ def run_download(
                         _timeout = float(val) * 60.0  # stored in minutes
                 except Exception:
                     pass
-                _read_process_output(proc, print_fn, depot_timeout=_timeout)
+                _read_process_output(proc, print_fn, depot_timeout=_timeout, cancel_check=_cancelled)
+                if _cancelled():
+                    return False, 0
                 try:
                     proc.wait(timeout=30)
                 except subprocess.TimeoutExpired:

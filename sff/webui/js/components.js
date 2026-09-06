@@ -58,6 +58,38 @@ window.Components = (function() {
     // SVG placeholder for missing game images (image-off icon)
     var NO_IMAGE_SVG = '<svg viewBox="0 0 24 24"><line x1="1" y1="1" x2="23" y2="23"/><path d="M21 21H3a2 2 0 01-2-2V5a2 2 0 012-2h18a2 2 0 012 2v14c0 .553-.224 1.053-.586 1.414"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>';
 
+    // New Steam apps use hashed asset paths the static CDN templates can't
+    // reach, so every cover ultimately comes from the backend's batch
+    // resolver. One bridge call resolves all uncached appids currently on
+    // the page; results land in the localStorage cover cache.
+    var _pendingCoverResolve = {};
+    var _coverResolveTimer = null;
+    function _requestCoverResolve(appId, onResolved) {
+        var id = String(appId);
+        if (_pendingCoverResolve[id]) {
+            _pendingCoverResolve[id].push(onResolved);
+            return;
+        }
+        _pendingCoverResolve[id] = [onResolved];
+        if (_coverResolveTimer) return;
+        _coverResolveTimer = setTimeout(function() {
+            _coverResolveTimer = null;
+            var batch = _pendingCoverResolve;
+            _pendingCoverResolve = {};
+            var ids = Object.keys(batch);
+            if (!ids.length || !window.Bridge) return;
+            Bridge.callWithCallback('get_cover_urls', JSON.stringify(ids), function(json) {
+                var map = {};
+                try { map = JSON.parse(json || '{}'); } catch (e) {}
+                ids.forEach(function(bid) {
+                    var url = map[bid] || '';
+                    if (url) _saveCoverCache(bid, url);
+                    batch[bid].forEach(function(cb) { cb(url); });
+                });
+            });
+        }, 50);
+    }
+
     function getCoverUrls(appId, canonicalUrl) {
         var cached = _getCachedCoverUrl(appId);
         if (cached) return [cached];
@@ -127,13 +159,28 @@ window.Components = (function() {
                     img.onerror = tryNextCard;
                     img.src = urls[urlIdx];
                 } else {
+                    // Static chain exhausted; the batch resolver usually
+                    // already has (or is fetching) the real URL.
                     img.onerror = null;
-                    wrap.innerHTML = '<div class="game-card-img-placeholder">' + NO_IMAGE_SVG + '</div>';
+                    _requestCoverResolve(game.app_id, function(url) {
+                        if (!url) return;
+                        img.onload = function() { _saveCoverCache(game.app_id, url); };
+                        img.onerror = null;
+                        img.src = url;
+                    });
                 }
             }
             img.onload = function() { _saveCoverCache(game.app_id, img.src); };
             img.onerror = tryNextCard;
             img.src = urls[0];
+            // Kick off the batch resolve in parallel so hashed-CDN apps
+            // don't wait for five 404s before their image is requested.
+            _requestCoverResolve(game.app_id, function(url) {
+                if (!url || img.complete && img.naturalWidth > 0) return;
+                img.onload = function() { _saveCoverCache(game.app_id, url); };
+                img.onerror = null;
+                img.src = url;
+            });
             wrap.appendChild(img);
         }
 
@@ -193,12 +240,23 @@ window.Components = (function() {
                     img.src = urls[urlIdx];
                 } else {
                     img.onerror = null;
-                    wrap.innerHTML = '<div class="game-card-img-placeholder" style="height:45px;width:80px;opacity:0.2">' + NO_IMAGE_SVG + '</div>';
+                    _requestCoverResolve(game.app_id, function(url) {
+                        if (!url) return;
+                        img.onload = function() { _saveCoverCache(game.app_id, url); };
+                        img.onerror = null;
+                        img.src = url;
+                    });
                 }
             }
             img.onload = function() { _saveCoverCache(game.app_id, img.src); };
             img.onerror = tryNextList;
             img.src = urls[0];
+            _requestCoverResolve(game.app_id, function(url) {
+                if (!url || img.complete && img.naturalWidth > 0) return;
+                img.onload = function() { _saveCoverCache(game.app_id, url); };
+                img.onerror = null;
+                img.src = url;
+            });
             wrap.appendChild(img);
         }
 
@@ -224,12 +282,20 @@ window.Components = (function() {
             statusText += ' — ' + Math.round(download.progress) + '%';
         }
 
+        var cancelHtml = '';
+        if (download.active && download.id && download.id !== 'unknown') {
+            cancelHtml =
+                '<div class="download-actions" style="display:flex;align-items:center;">' +
+                    '<button class="btn btn-sm" data-cancel-appid="' + escapeHtml(download.id) + '">Cancel</button>' +
+                '</div>';
+        }
+
         item.innerHTML =
             '<div class="download-item-info">' +
                 '<div class="download-item-name">' + escapeHtml(download.name || 'Unknown') + '</div>' +
                 '<div class="download-item-status">' + escapeHtml(statusText) + '</div>' +
                 progressHtml +
-            '</div>';
+            '</div>' + cancelHtml;
 
         return item;
     }

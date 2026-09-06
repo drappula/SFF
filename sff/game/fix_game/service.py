@@ -599,6 +599,11 @@ Default Goldberg port: 47584 — make sure it is open in your firewall.
             run_dir = config_exe.parent
             run_exe = config_exe
         env = os.environ.copy()
+        # This app is PyInstaller-frozen: the bootloader sets PYTHONHOME to our
+        # own bundle, and the child exe's embedded Python then can't find
+        # 'encodings' there. Strip it (and PYTHONPATH) before spawning.
+        for k in ("PYTHONHOME", "PYTHONPATH"):
+            env.pop(k, None)
         if auth_mode == "login" and username and password:
             env["GSE_CFG_USERNAME"] = username
             env["GSE_CFG_PASSWORD"] = password

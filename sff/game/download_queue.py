@@ -26,6 +26,7 @@ data dir, so queued and in-progress items survive restarts.
 
 import json
 import logging
+import threading
 import time
 import uuid
 
@@ -160,7 +161,12 @@ def mark_started(item_id):
 
 
 def mark_finished(app_id, success, error=""):
-    """Mark a downloading item done/failed by app id."""
+    """Mark a downloading item done/failed by app id. A cancelled item is
+    dropped from the queue instead of being marked failed."""
+    if is_cancelled(app_id):
+        clear_cancel(app_id)
+        _save([e for e in _load() if e["app_id"] != str(app_id)])
+        return True
     items = _load()
     found = False
     for e in items:
@@ -177,6 +183,46 @@ def mark_finished(app_id, success, error=""):
 def remove_item(item_id):
     items = [e for e in _load() if e["id"] != str(item_id)]
     _save(items)
+
+
+# ── In-flight cancel ──────────────────────────────────────────────────
+# The download engines poll request_cancel()/is_cancelled() between depots
+# and chunks; the bridge calls it when the user hits Cancel. Process-wide
+# (not persisted): a restart requeues interrupted items anyway.
+_cancelled: set = set()
+_cancel_lock = threading.Lock()
+
+
+def request_cancel(app_id):
+    with _cancel_lock:
+        _cancelled.add(str(app_id))
+
+
+def clear_cancel(app_id):
+    with _cancel_lock:
+        _cancelled.discard(str(app_id))
+
+
+def is_cancelled(app_id):
+    with _cancel_lock:
+        return str(app_id) in _cancelled
+
+
+def cancel_item(item_id):
+    """Cancel a queue item. Queued items are dropped outright; downloading
+    items get flagged so the engine stops, and the row is removed once the
+    task_finished handler runs. Returns the item dict, or None if unknown."""
+    items = _load()
+    for e in items:
+        if e["id"] == str(item_id):
+            if e["state"] == STATE_DOWNLOADING:
+                logger.debug("queue: cancel requested for app %s (in flight)", e["app_id"])
+                request_cancel(e["app_id"])
+            else:
+                logger.debug("queue: dropped queued item %s (app %s)", item_id, e["app_id"])
+                _save([x for x in items if x["id"] != str(item_id)])
+            return e
+    return None
 
 
 def retry_item(item_id):

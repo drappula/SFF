@@ -807,6 +807,46 @@ def _fetch_steam_platforms(app_ids):
     return out
 
 
+_COVER_URL_CACHE: dict[str, str] = {}
+
+
+def _bridge_get_cover_urls(bridge, app_ids_json):
+    """Canonical header image URLs for a batch of appids: {appid: url}.
+
+    New Steam apps moved to hashed asset paths (header.jpg 404s), so the
+    frontend's static CDN templates can't cover them; this returns the
+    real hashed URLs from GetItems. Unknown apps map to "".
+    """
+    try:
+        raw = json.loads(app_ids_json or "[]")
+        ids = [int(x) for x in raw if str(x).strip().isdigit()]
+    except Exception:
+        return "{}"
+    out: dict[str, str] = {}
+    missing = []
+    for aid in ids:
+        key = str(aid)
+        if key in _COVER_URL_CACHE:
+            out[key] = _COVER_URL_CACHE[key]
+        else:
+            missing.append(aid)
+    if missing:
+        try:
+            urls, _, _ = _fetch_steam_image_urls(missing)
+        except Exception:
+            urls = {}
+        for aid in missing:
+            key = str(aid)
+            url = urls.get(aid) or ""
+            _COVER_URL_CACHE[key] = url
+            out[key] = url
+        logger.debug(
+            "cover resolve: %d ids, %d fresh lookups, %d resolved",
+            len(ids), len(missing), sum(1 for a in missing if urls.get(a)),
+        )
+    return json.dumps(out)
+
+
 def _bridge_get_game_platforms(bridge, app_id):
     """JSON list of lowercase OS tags for one appid ("windows", "macos",
     "linux"). Empty list when Steam has no platform data, so the UI keeps

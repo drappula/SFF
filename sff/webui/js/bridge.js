@@ -142,6 +142,7 @@ window.Bridge = (function() {
             dlc_check_get_list: function() {},
             enqueue_dropped_blobs: function() {},
             get_platform: function(cb) { if (cb) cb('win32'); },
+            is_steamos: function(cb) { if (cb) cb(''); },
             app_update_check: function(arg, cb) { if (cb) cb('{"ok":true,"update_available":false,"current":"dev","latest":"dev"}'); },
             lumacore_check_update: function(arg, cb) { if (cb) cb('{"installed":"dev","latest":"dev","update_available":false}'); },
             connect_store: function() {},
@@ -176,6 +177,7 @@ window.Bridge = (function() {
             browse_game_folder: function(cb) { if (cb) cb(''); },
             run_game_action_outside: function() {},
             open_url: function() {},
+            get_cover_urls: function(ids, cb) { if (cb) cb('{}'); },
         };
         _ready = true;
         _readyCallbacks.forEach(function(cb) { cb(_py); });

@@ -32,6 +32,7 @@ Files are expected alongside all_games.txt in the internal data folder:
 """
 
 import json
+import re
 import logging
 import os
 import ssl
@@ -675,6 +676,54 @@ def enrich_game_dict(game: dict) -> dict:
     return game
 
 
+def _popular_rank(force=False):
+    """Steam top-selling chart as a popularity rank: appid -> position.
+
+    Scraped from the charts HTML page (the JSON APIs need auth or only
+    carry 10 featured items). 24h TTL like the other metadata; a failed
+    refresh falls back to the last cached copy.
+    """
+    global _popular_ranks, _popular_rank_time
+    now = time.time()
+    if not force and _popular_ranks and (now - _popular_rank_time) < _CACHE_TTL:
+        return _popular_ranks
+
+    path = _get_cache_dir() / "topselling.json"
+    if not _popular_ranks and path.exists():
+        try:
+            with path.open(encoding="utf-8") as f:
+                _popular_ranks = {str(k): v for k, v in json.load(f).items()}
+            _popular_rank_time = path.stat().st_mtime
+        except Exception as exc:
+            logger.debug("Failed to load cached topselling.json: %s", exc)
+    if not force and _popular_ranks and (now - _popular_rank_time) < _CACHE_TTL:
+        return _popular_ranks
+
+    try:
+        request = _req.Request(
+            "https://store.steampowered.com/charts/topselling?l=english",
+            headers={"User-Agent": "SteaMidra/6.3.2"},
+        )
+        with _req.urlopen(request, timeout=20, context=_get_ssl_ctx()) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+        ranks: dict[str, int] = {}
+        for appid in re.findall(r'/app/(\d+)/', html):
+            if appid not in ranks:
+                ranks[appid] = len(ranks)
+        if ranks:
+            _popular_ranks = ranks
+            _popular_rank_time = now
+            _atomic_json_write(path, ranks)
+            logger.debug("Popular sort: %d ranked apps from top-selling chart", len(ranks))
+    except Exception as exc:
+        logger.debug("Failed to refresh top-selling chart: %s", exc)
+    return _popular_ranks
+
+
+_popular_ranks = {}
+_popular_rank_time = 0.0
+
+
 def browse_games_json(offset=0, per_page=20, sort_by="updated", block_nsfw=False):
     """Return one Store page directly from the local metadata cache.
 
@@ -723,7 +772,16 @@ def browse_games_json(offset=0, per_page=20, sort_by="updated", block_nsfw=False
         )
 
     items = eligible_items()
-    if sort_mode == "name_asc":
+    if sort_mode == "popular":
+        ranks = _popular_rank()
+        if ranks:
+            items = [i for i in items if i[0] and str(i[0]) in ranks]
+            selected = heapq.nsmallest(window, items, key=lambda it: (ranks[str(it[0])], it[0]))
+        else:
+            # No chart data (offline, first fetch failed): fall back to
+            # recently-updated so the default sort still shows a page.
+            selected = heapq.nlargest(window, items, key=updated_key)
+    elif sort_mode == "name_asc":
         selected = heapq.nsmallest(window, items, key=name_key)
     elif sort_mode == "name_desc":
         selected = heapq.nlargest(window, items, key=name_key)

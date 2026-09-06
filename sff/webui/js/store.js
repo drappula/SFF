@@ -11,7 +11,7 @@ window.Store = (function() {
     var _totalPages = 1;
     var _total = 0;
     var _searchQuery = '';
-    var _sortBy = 'updated';
+    var _sortBy = 'popular';
     var _viewMode = 'grid';
     var _selectMode = false;
     var _selection = {};
@@ -58,6 +58,7 @@ window.Store = (function() {
         }
 
         if (sortSelect) {
+            sortSelect.value = _sortBy;
             sortSelect.addEventListener('change', function() {
                 _sortBy = this.value;
                 _page = 1;

@@ -99,6 +99,14 @@ window.App = (function() {
                 }
                 if (_currentPage === 'home') _refreshHomeLumacoreNotice();
 
+                // SteamOS-only: Patch Gaming Mode button on the Linux Tools page
+                if (_platform !== 'win32') {
+                    Bridge.callSync('is_steamos', function(val) {
+                        var btn = document.getElementById('gaming-mode-patch-btn');
+                        if (btn && val) btn.style.display = '';
+                    });
+                }
+
                 // Linux first-launch guide popup (SteamOS/Steam Deck users)
                 if (_platform !== 'win32') {
                     Bridge.callWithCallback('get_setting', 'linux_guide_shown', function(val) {
@@ -1410,6 +1418,21 @@ window.App = (function() {
                 _importVersionManifestHtml();
             });
         }
+        var versionIdSearchBtn = document.getElementById('version-id-search-btn');
+        if (versionIdSearchBtn) {
+            versionIdSearchBtn.addEventListener('click', function() {
+                _searchVersionById();
+            });
+        }
+        var versionIdSearchInp = document.getElementById('version-id-search');
+        if (versionIdSearchInp) {
+            versionIdSearchInp.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    _searchVersionById();
+                }
+            });
+        }
 
         // Home page action cards
         document.querySelectorAll('.action-card[data-action]').forEach(function(card) {
@@ -1692,6 +1715,64 @@ window.App = (function() {
         }
     }
 
+    function _fmtVersionDate(d) {
+        if (!d || d === '0000-00-00') return 'Unknown date';
+        if (/^\d{11,}$/.test(String(d))) return 'Archived';  // GID-keyed row; short form added by caller
+        var parts = String(d).split('-');
+        if (parts.length !== 3 || !/^\d{4}$/.test(parts[0]) || !/^\d{2}$/.test(parts[1]) || !/^\d{2}$/.test(parts[2])) return d;
+        var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        return months[parseInt(parts[1], 10) - 1] + ' ' + parseInt(parts[2], 10) + ', ' + parts[0];
+    }
+
+    function _renderVersionList(groups) {
+        var list = document.getElementById('version-list');
+        if (!list) return;
+        list.classList.remove('hidden');
+        list.innerHTML = '';
+        var wantBid = String(window._olderVersionCrackBuildId || '');
+        var real = (groups || []).filter(function(g) { return g.date && g.date !== '0000-00-00'; });
+        var undated = (groups || []).filter(function(g) { return !g.date || g.date === '0000-00-00'; });
+        if (!real.length && !undated.length) {
+            list.innerHTML = '<div style="padding:14px;font-size:12px;opacity:0.7;">No version history found. Use "Advanced" below to enter manifest IDs manually.</div>';
+            return;
+        }
+        real.concat(undated).forEach(function(g) {
+            var gi = groups.indexOf(g);
+            var row = document.createElement('label');
+            row.className = 'download-option';
+            row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 12px;margin-bottom:6px;cursor:pointer;';
+            var isLatest = gi === 0;
+            var title = _fmtVersionDate(g.date);
+            var isGidRow = /^\d{11,}$/.test(String(g.date));
+            if (isGidRow) title += ' · GID ' + String(g.date).replace(/^0+/, '').slice(0, 6);
+            var sub = [];
+            var nDep = Object.keys((g.entries || []).reduce(function(m, e) { m[e.depot_id] = 1; return m; }, {})).length;
+            if (g.branch && g.branch !== 'public') sub.push(g.branch);
+            sub.push(nDep === 1 ? '1 depot' : nDep + ' depots');
+            if (g.source) sub.push(g.source);
+            var bidTxt = g.build_id ? 'Build ' + g.build_id : '';
+            var preselect = wantBid && g.build_id === wantBid;
+            row.innerHTML =
+                '<input type="radio" name="version-pick" class="version-radio" data-group="' + gi + '"' + (preselect ? ' checked' : '') + '>' +
+                '<div style="flex:1;">' +
+                    '<div style="font-weight:600;font-size:13px;">' + Components.escapeHtml(title) +
+                    (isLatest ? ' <span style="font-size:10px;color:var(--accent);">(latest)</span>' : '') +
+                    (preselect ? ' <span style="font-size:10px;color:#4caf50;">(crack build)</span>' : '') +
+                    '</div>' +
+                    '<div style="font-size:11px;opacity:0.65;">' + Components.escapeHtml(sub.join(' · ')) + (bidTxt ? ' · ' + Components.escapeHtml(bidTxt) : '') + '</div>' +
+                '</div>';
+            list.appendChild(row);
+        });
+        list.onchange = function(e) {
+            if (!e.target.classList.contains('version-radio')) return;
+            var dlBtn = document.getElementById('version-download');
+            if (dlBtn) dlBtn.disabled = false;
+        };
+        var pre = list.querySelector('.version-radio:checked');
+        var dlBtn = document.getElementById('version-download');
+        if (pre && dlBtn) dlBtn.disabled = false;
+    }
+
     function _renderVersionGroups(groups, options) {
         options = options || {};
         var loading = document.getElementById('version-loading');
@@ -1820,6 +1901,34 @@ window.App = (function() {
         var manualInp = document.getElementById('version-manual-input');
         var dlBtn = document.getElementById('version-download');
         var session = _versionHistorySession;
+        window._olderVersionCrackBuildId = window._olderVersionCrackBuildId || '';
+
+        var adv = document.getElementById('version-advanced');
+        var advToggle = document.getElementById('version-advanced-toggle');
+        var listEl = document.getElementById('version-list');
+        if (adv) adv.classList.add('hidden');
+        if (advToggle) advToggle.textContent = 'Advanced: pick depots manually';
+        if (listEl) listEl.innerHTML = '';
+        if (advToggle && !advToggle.dataset.wired) {
+            advToggle.dataset.wired = '1';
+            advToggle.addEventListener('click', function() {
+                if (!adv) return;
+                var show = adv.classList.toggle('hidden') === false;
+                advToggle.textContent = show ? 'Hide advanced' : 'Advanced: pick depots manually';
+                var manBtn = document.getElementById('version-manual-download');
+                if (manBtn) manBtn.style.display = show ? '' : 'none';
+                var dlBtn = document.getElementById('version-download');
+                if (dlBtn) {
+                    if (show) {
+                        var cb = document.getElementById('version-tbody');
+                        dlBtn.disabled = !(cb && cb.querySelectorAll('.version-check:checked').length);
+                    } else {
+                        var r = document.querySelector('#version-list .version-radio:checked');
+                        dlBtn.disabled = !r;
+                    }
+                }
+            });
+        }
         window._versionGroupsData = [];
 
         if (loading) loading.classList.remove('hidden');
@@ -1841,6 +1950,7 @@ window.App = (function() {
             try {
                 var groups = JSON.parse(json);
                 window._versionGroupsData = groups;
+                _renderVersionList(groups);
                 _renderVersionGroups(groups, { expanded: false });
             } catch(e) {
                 Components.showToast('error', 'Failed to load version history');
@@ -1855,24 +1965,137 @@ window.App = (function() {
         var dlBtn = document.getElementById('version-download');
         var appId = dlBtn ? dlBtn.dataset.appid : '';
         var tbody = document.getElementById('version-tbody');
-        if (!tbody || !appId) return;
+        if (!appId) return;
 
-        var editDiv = document.getElementById('version-depot-edit');
-        var editActive = editDiv && !editDiv.classList.contains('hidden');
+        var adv = document.getElementById('version-advanced');
+        var advActive = adv && !adv.classList.contains('hidden');
 
         var manifest_override = {};
-        if (editActive) {
-            manifest_override = _getDepotEditOverrides();
+        if (advActive && tbody) {
+            var editDiv = document.getElementById('version-depot-edit');
+            var editOn = editDiv && !editDiv.classList.contains('hidden');
+            if (editOn) {
+                manifest_override = _getDepotEditOverrides();
+            } else {
+                tbody.querySelectorAll('.version-check:checked').forEach(function(cb) {
+                    manifest_override[cb.dataset.depot] = cb.dataset.manifest;
+                });
+            }
         } else {
-            tbody.querySelectorAll('.version-check:checked').forEach(function(cb) {
-                manifest_override[cb.dataset.depot] = cb.dataset.manifest;
-            });
+            var radio = document.querySelector('#version-list .version-radio:checked');
+            if (radio) {
+                var g = (window._versionGroupsData || [])[parseInt(radio.dataset.group, 10)];
+                (g && g.entries || []).forEach(function(e) {
+                    manifest_override[String(e.depot_id)] = String(e.manifest_id);
+                });
+            }
         }
         if (!Object.keys(manifest_override).length) {
-            Components.showToast('warning', 'Select at least one depot or use Manual IDs.');
+            Components.showToast('warning', 'Select a version first.');
             return;
         }
-        _downloadVersionWithOverride(appId, manifest_override);
+        _downloadVersionWithOverride(appId, manifest_override, _buildIdForOverride(manifest_override));
+    }
+
+    // Search box in the version picker: numeric input is either a manifest
+    // GID (19+ digits, selects the archived row containing it) or a build
+    // ID (shorter, selects the matching dated row; falls back to the
+    // DepotBox build-details lookup that pins the build + reloads Steam).
+    function _searchVersionById() {
+        var inp = document.getElementById('version-id-search');
+        var dlBtn = document.getElementById('version-download');
+        var raw = inp ? inp.value.replace(/[^0-9]/g, '') : '';
+        if (!raw) {
+            Components.showToast('warning', 'Enter a Manifest GID or Build ID.');
+            return;
+        }
+        var groups = window._versionGroupsData || [];
+
+        if (raw.length <= 12) {
+            for (var i = 0; i < groups.length; i++) {
+                if (String(groups[i].build_id || '') === raw) {
+                    var radio = document.querySelector('#version-list .version-radio[data-group="' + i + '"]');
+                    if (radio) {
+                        radio.checked = true;
+                        radio.dispatchEvent(new Event('change', { bubbles: true }));
+                        radio.scrollIntoView({ block: 'center' });
+                        Components.showToast('success', 'Found version with build ' + raw + ' — selected.');
+                        return;
+                    }
+                }
+            }
+            // Not in history: resolve depots via the DepotBox build-details
+            // API and pin them (same flow as the Downgrade tab).
+            var appId = dlBtn ? dlBtn.dataset.appid : '';
+            if (!appId) return;
+            _withLibraryPick(function() {
+                Components.showToast('info', 'Starting download of build ' + raw + '...');
+                Bridge.call('download_older_version_auto', appId, raw);
+                Components.hideModal('version-modal');
+            });
+            return;
+        }
+
+        // Manifest GID: check advanced table checkboxes first, then radio rows.
+        var hit = null;
+        for (var j = 0; j < groups.length && !hit; j++) {
+            var entries = groups[j].entries || [];
+            for (var k = 0; k < entries.length; k++) {
+                if (String(entries[k].manifest_id) === raw) { hit = { group: j, entry: entries[k] }; break; }
+            }
+        }
+        if (!hit) {
+            Components.showToast('warning', 'No version in history contains manifest GID ' + raw + '. Try Advanced to enter it manually.');
+            return;
+        }
+        var cb = document.querySelector('#version-tbody .version-check[data-depot="' + hit.entry.depot_id + '"][data-manifest="' + hit.entry.manifest_id + '"]');
+        if (cb) {
+            cb.checked = true;
+            cb.dispatchEvent(new Event('change', { bubbles: true }));
+            cb.scrollIntoView({ block: 'center' });
+            var hdr = document.querySelector('#version-table .version-group-header[data-group="vg-' + hit.group + '"]');
+            if (hdr) hdr.click();
+            // The simple radio list is what Download Selected reads when
+            // Advanced is hidden; keep both in sync so the row shows
+            // selected either way.
+            var radioSync = document.querySelector('#version-list .version-radio[data-group="' + hit.group + '"]');
+            if (radioSync) {
+                radioSync.checked = true;
+                radioSync.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        } else {
+            var radio2 = document.querySelector('#version-list .version-radio[data-group="' + hit.group + '"]');
+            if (radio2) {
+                radio2.checked = true;
+                radio2.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            var adv2 = document.getElementById('version-advanced');
+            if (adv2 && adv2.classList.contains('hidden')) {
+                var tg = document.getElementById('version-advanced-toggle');
+                if (tg) tg.click();
+            }
+        }
+        Components.showToast('success', 'Selected the version containing GID ' + raw + '.');
+    }
+
+    // The chosen version's build ID comes from the depot-history group that
+    // owns the selected manifest GIDs. Without it the ACF gets stamped with
+    // the live public build, so crack checks and Steam keep demanding an
+    // update after a downgrade.
+    function _buildIdForOverride(override) {
+        var groups = window._versionGroupsData || [];
+        for (var i = 0; i < groups.length; i++) {
+            var g = groups[i];
+            if (!g.build_id) continue;
+            var entries = g.entries || [];
+            for (var j = 0; j < entries.length; j++) {
+                var e = entries[j];
+                if (override[String(e.depot_id)] === String(e.manifest_id)) {
+                    return String(g.build_id);
+                }
+            }
+        }
+        return String(window._olderVersionCrackBuildId || '');
     }
 
     function _downloadManualVersion() {
@@ -1942,20 +2165,23 @@ window.App = (function() {
                 });
                 if (filtered.length) {
                     added += filtered.length;
-                    _versionImportedGroups.push({
+                    var gObj = {
                         label: group.label || 'Imported HTML',
                         date: group.date || 'Imported',
                         branch: group.branch || 'manual',
                         source: group.source || 'Imported HTML',
                         entries: filtered
-                    });
+                    };
+                    _versionImportedGroups.push(gObj);
+                    window._versionGroupsData = (window._versionGroupsData || []).concat([gObj]);
                 }
             });
             if (!added) {
                 Components.showToast('warning', 'Those depot IDs are already listed.');
                 return;
             }
-            _renderVersionGroups(_versionImportedGroups, { expanded: true });
+            _renderVersionList(window._versionGroupsData);
+            _renderVersionGroups(window._versionGroupsData, { expanded: true });
             Components.showToast('success', result.message || 'Imported depot manifest IDs');
         });
     }
@@ -2052,38 +2278,34 @@ window.App = (function() {
         return overrides;
     }
 
-    function _downloadVersionWithOverride(appId, manifest_override) {
+    function _withLibraryPick(cb) {
+        Bridge.callSync('get_steam_libraries', function(json) {
+            var libs;
+            try { libs = JSON.parse(json || '[]'); } catch(e) { libs = []; }
+            if (libs.length <= 1) {
+                if (libs.length === 1) Bridge.call('set_active_library', libs[0]);
+                cb();
+            } else {
+                Components.showLibraryModal(libs, function(selectedLib) {
+                    Bridge.call('set_active_library', selectedLib);
+                    cb();
+                });
+            }
+        });
+    }
+
+    function _downloadVersionWithOverride(appId, manifest_override, buildId) {
         Components.hideModal('version-modal');
         var method = window._olderVersionMethod || 'ddmod';
         var source = window._olderVersionSource || 'oureveryday';
 
-        var doDownload = function() {
+        _withLibraryPick(function() {
             if (method === 'steam_native') {
                 Bridge.call('download_game_version_native', appId, JSON.stringify(manifest_override), source);
                 Components.showToast('info', 'Setting up Steam Native download for App ' + appId + '...');
             } else {
-                Bridge.call('download_game_version', appId, JSON.stringify(manifest_override), source);
+                Bridge.call('download_game_version', appId, JSON.stringify(manifest_override), source, buildId || '');
                 Components.showToast('info', 'Downloading specific version of App ' + appId + '...');
-            }
-        };
-
-        if (method === 'steam_native') {
-            doDownload();
-            return;
-        }
-
-        Bridge.callSync('get_steam_libraries', function(json) {
-            var libs;
-            try { libs = JSON.parse(json || '[]'); } catch(e) { libs = []; }
-
-            if (libs.length <= 1) {
-                if (libs.length === 1) Bridge.call('set_active_library', libs[0]);
-                doDownload();
-            } else {
-                Components.showLibraryModal(libs, function(selectedLib) {
-                    Bridge.call('set_active_library', selectedLib);
-                    doDownload();
-                });
             }
         });
     }
@@ -2329,6 +2551,12 @@ window.App = (function() {
             return;
         }
 
+        if (action === 'patch_gaming_mode') {
+            Components.showToast('info', 'Patching Gaming Mode (steam-jupiter)...');
+            Bridge.call('patch_gaming_mode');
+            return;
+        }
+
         if (action === 'lc_online_fix') {
             _initLcOnlineFixModal();
             var appId = _getSelectedGameId();
@@ -2427,7 +2655,7 @@ window.App = (function() {
             'download_games', 'download_manifests', 'recent_lua', 'update_manifests',
             'mute_toggle', 'remove_game', 'context_menu', 'applist_menu',
             'check_updates', 'scan_library', 'analytics', 'auto_lc_setup', 'lc_online_fix',
-            'steam_updates', 'let_updates', 'fix_slssteam_hash'
+            'steam_updates', 'let_updates', 'fix_slssteam_hash', 'patch_gaming_mode'
         ];
         // Start Menu entry uses a dedicated slot, not run_game_action
         if (action === 'start_menu') {

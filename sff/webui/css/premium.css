@@ -1211,6 +1211,7 @@ select:focus-visible,
   background: linear-gradient(90deg, rgba(74, 158, 255, 0.1), transparent);
   transition: width 0.3s ease;
   border-radius: 12px 0 0 12px;
+  pointer-events: none;
 }
 
 .download-item:hover {

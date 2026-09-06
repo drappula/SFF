@@ -330,6 +330,17 @@ async def get_gmrc(manifest_id: Union[str, int], silent: bool = False):
 
 
 def get_game_name(app_id):
+    # Local games.json cache first: instant, offline, and the store API
+    # fails often enough that the interactive prompt fired on nearly
+    # every download (and fired once per call site).
+    try:
+        from sff.game_list_fallback import get_app_name
+        local = get_app_name(app_id)
+    except Exception:
+        local = ""
+    if local:
+        logger.debug("get_game_name(%s): local cache -> %s", app_id, local)
+        return local
     official_info = asyncio.run(
         get_request(
             f"https://store.steampowered.com/api/appdetails/?appids={app_id}",
@@ -338,14 +349,17 @@ def get_game_name(app_id):
     )
     if official_info:
         app_name = official_info.get(app_id, {}).get("data", {}).get("name")
-        if app_name is None:
-            app_name = prompt_text(
-                "Request succeeded but couldn't find the game name. "
-                "Type the name of it: "
-            )
-    else:
-        app_name = prompt_text("Request failed. Type the name of the game: ")
-    return app_name
+        if app_name:
+            logger.debug("get_game_name(%s): store API -> %s", app_id, app_name)
+            return app_name
+    # The name only feeds the ACF display field and install folder name.
+    # In the GUI a blocking prompt is never worth it — fall back to a
+    # generic name. CLI users can still type one for delisted apps.
+    from sff.ui.prompts import _gui_backend
+    if _gui_backend is not None:
+        logger.debug("get_game_name(%s): unresolved, GUI fallback 'App %s'", app_id, app_id)
+        return f"App {app_id}"
+    return prompt_text("Request failed. Type the name of the game: ")
 
 
 @contextmanager

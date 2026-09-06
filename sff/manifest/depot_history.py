@@ -1726,7 +1726,14 @@ def get_depot_manifests(depot_id, fetch_dates = True,
                 pass
 
     def _sort_key(e):
-        return e.date if re.match(r"\d{4}-\d{2}-\d{2}", e.date) else "0000-00-00"
+        # Dated entries sort by date; undated mirror entries fall back to
+        # GID (Valve assigns them roughly chronologically, highest = newest)
+        # so history still reads newest-first without any GitHub date calls.
+        if re.match(r"\d{4}-\d{2}-\d{2}", e.date):
+            return f"1{e.date}"
+        if e.manifest_id.isdigit():
+            return f"0{int(e.manifest_id):030d}"
+        return "0000-00-00"
 
     entries.sort(key=_sort_key, reverse=True)
     _RESULT_CACHE[depot_id] = (time.time(), entries)
@@ -1896,11 +1903,29 @@ def group_by_version(depot_history: dict[str, list[ManifestEntry]], build_ids: d
     # bucket key -> list of (depot_id, entry)
     buckets = {}
 
+    # Manifest GIDs already shown in a dated row: the mirror lists the same
+    # current manifest without a date, which would duplicate the row.
+    dated_gids = {
+        e.manifest_id
+        for entries in depot_history.values() for e in entries
+        if re.match(r"\d{4}-\d{2}-\d{2}", e.date)
+    }
+
     for depot_id, entries in depot_history.items():
         for entry in entries:
             date = entry.date
             is_real_date = bool(re.match(r"\d{4}-\d{2}-\d{2}", date))
-            bucket_date = date if is_real_date else "__archive__"
+            if is_real_date:
+                bucket_date = date
+            elif entry.manifest_id in dated_gids:
+                continue  # already shown in a dated row; mirror copy is a dup
+            elif entry.manifest_id.isdigit():
+                # No offline date: one row per manifest, ordered by GID
+                # (Valve assigns them roughly chronologically). Zero-padding
+                # keeps the string keys GID-ordered.
+                bucket_date = f"__gid__{int(entry.manifest_id):030d}"
+            else:
+                bucket_date = "__archive__"
             key = (bucket_date, entry.branch, entry.source)
             buckets.setdefault(key, []).append((depot_id, entry))
 
@@ -1911,6 +1936,10 @@ def group_by_version(depot_history: dict[str, list[ManifestEntry]], build_ids: d
         if bucket_date == "__archive__":
             label = f"Unknown date  —  {branch}  —  {source}  ({unique_depots} {depot_word})"
             sort_date = "0000-00-00"
+        elif bucket_date.startswith("__gid__"):
+            _gid_txt = str(int(bucket_date[7:]))
+            label = f"Archived  —  {branch}  —  {source}  (GID {_gid_txt[:6]})"
+            sort_date = bucket_date[7:]
         else:
             label = f"{bucket_date}  —  {branch}  —  {source}  ({unique_depots} {depot_word})"
             sort_date = bucket_date
@@ -1936,7 +1965,10 @@ def group_by_version(depot_history: dict[str, list[ManifestEntry]], build_ids: d
             build_id=bid,
         ))
 
-    groups.sort(key=lambda g: g.date, reverse=True)
+    # Dated groups (10-char ISO dates) first newest-first, then GID-keyed
+    # rows (zero-padded GIDs). Plain reverse would put 9-prefixed GIDs
+    # above "2026-..."; the two-tier key keeps dates on top.
+    groups.sort(key=lambda g: ("1" if len(g.date) == 10 else "0") + g.date, reverse=True)
 
     # ---------------------------------------------------------------------------
     # Post-process: resolve empty manifest_ids that the SteamDB app history page

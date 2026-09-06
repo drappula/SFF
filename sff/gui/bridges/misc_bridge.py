@@ -1791,6 +1791,35 @@ def _bridge_fix_slssteam_hash(bridge):
 
     bridge._run_async(_do, on_done=_on_done)
 
+def _bridge_patch_gaming_mode(bridge):
+    """Inject SLSsteam LD_AUDIT into /usr/bin/steam-jupiter (SteamOS only)."""
+    def _do():
+        if not sys.platform.startswith("linux"):
+            return (False, "Gaming Mode patch is only available on Linux.")
+        log_lines: list[str] = []
+        try:
+            from sff.linux.slssteam import is_steamos, patch_steam_jupiter
+            if not is_steamos():
+                return (False, "This tool is only for SteamOS / Steam Deck.")
+            ok = patch_steam_jupiter(log_lines.append)
+            return (ok, "\n".join(str(x) for x in log_lines) or ("Gaming Mode patched." if ok else "Patch failed."))
+        except Exception as exc:
+            logger.exception("patch_gaming_mode failed: %s", exc)
+            return (False, str(exc))
+
+    def _on_done(result):
+        ok, msg = result if isinstance(result, tuple) else (False, "Gaming Mode patch failed")
+        bridge._emit_task_result("patch_gaming_mode", ok, msg)
+
+    bridge._run_async(_do, on_done=_on_done)
+
+def _bridge_is_steamos(bridge):
+    try:
+        from sff.linux.slssteam import is_steamos
+        return "true" if is_steamos() else ""
+    except Exception:
+        return ""
+
 def _bridge_get_webui_translations(bridge, lang):
     """Return the webui translation JSON for the given language."""
     from sff.core.utils import root_folder

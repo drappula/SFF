@@ -941,7 +941,7 @@ class UI:
             )
         return MainReturnCode.LOOP
 
-    def process_from_store(self, app_id: str, manifest_override: dict, use_hubcap: bool, lib_path=None):
+    def process_from_store(self, app_id: str, manifest_override: dict, use_hubcap: bool, lib_path=None, build_id_override: str = ""):
         """Full download pipeline triggered from the Store tab version picker.
         Downloads game files via DepotDownloaderMod, then writes ACF so
         Steam shows a Play button instead of Update/Install.
@@ -1100,6 +1100,13 @@ class UI:
                 pass
         buildid = "0"
         acf_manifest_map = dict(manifest_override)
+        if build_id_override and str(build_id_override).strip().isdigit():
+            # The picker knows which build the chosen manifests belong to.
+            # The Steam API only reports the live public branch, which for
+            # a downgrade is the NEWER build — stamping that into the ACF
+            # made crack checks and Steam keep demanding an update.
+            buildid = str(build_id_override).strip()
+            print(Fore.GREEN + f"Using selected buildid: {buildid}" + Style.RESET_ALL)
         try:
             app_data = provider.get_single_app_info(int(parsed_lua.app_id))
             bid = (
@@ -1108,10 +1115,10 @@ class UI:
                 .get("public", {})
                 .get("buildid")
             )
-            if bid:
+            if bid and buildid == "0":
                 buildid = str(bid)
                 print(Fore.GREEN + f"Resolved buildid: {buildid}" + Style.RESET_ALL)
-            else:
+            elif not bid and buildid == "0":
                 print(Fore.YELLOW + "Could not resolve buildid from Steam API — using 0" + Style.RESET_ALL)
             all_depots = app_data.get("depots", {})
             # Only fill in manifest GIDs that weren't resolved during the

@@ -213,6 +213,9 @@ class GameHandler:
             set_setting(Settings.STEAM_PASS, password)
             set_setting(Settings.STEAM32_ID, steam32_id)
         env = os.environ.copy()
+        # Frozen parent leaks PYTHONHOME into the child's embedded Python.
+        for k in ("PYTHONHOME", "PYTHONPATH"):
+            env.pop(k, None)
         env["GSE_CFG_USERNAME"] = user
         env["GSE_CFG_PASSWORD"] = password
         extra_args = []
