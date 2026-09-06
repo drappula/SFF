@@ -1,5 +1,24 @@
 # Changelog
 
+## 6.6.7a
+
+### New
+
+- **Popular sort** - the Store tab defaults to a Popular order built from Steam's top-selling chart (cached 24h, falls back to recently-updated offline).
+- **Search by GID or Build ID** - the Download Older Version box takes a manifest GID (selects the matching archived row) or a build ID (downloads that build directly through the DepotBox build-details API). Archived rows show the first digits of their GID.
+- **Download location picker** - both older-version flows ask which library to install to when you have more than one.
+- **SteamOS Gaming Mode patch** - Settings can inject SLSsteam into `/usr/bin/steam-jupiter` so ownership works in Gaming Mode, not just Desktop Mode.
+- **Cancel in-flight downloads** - the Downloads tab can stop a running download; the engines poll a cancel flag between depots and chunks, and optionally wipe partial files once the engine stops.
+
+### Fixed
+
+- **Older-version downloads** - show the real game name (local cache first, the GUI never prompts for a name), unified Downloads-tab progress like normal installs (including DDMod's per-file lines), and register with SLSSteam so Steam shows Play instead of Purchase.
+- **Build-ID downgrade on Linux** - removed the Windows-only gate; the flow fetches a missing Lua automatically and closes Steam around the config writes.
+- **Native download speed** - the CDN server list was ignored (a type check always failed) and chunks round-robined across every host, so slow servers dominated wall-clock (53 KB/s while DDMod hit 12 MB/s on the same list). Servers are now normalized, latency-probed, and the pool is capped at the top 4.
+- **Cover images for new releases** - Steam moved new apps to hashed asset paths, so the static header.jpg URLs 404'd. The backend now resolves canonical cover URLs in batches and the Store tab uses them for every card.
+- **Downgrade no longer restarts Steam** when the download finishes.
+- **Goldberg config crashes** - the frozen app leaked PYTHONHOME into the child process, breaking its embedded Python. Stripped before spawn now.
+
 ## 6.6.7
 
 ### Fixed
