@@ -151,8 +151,9 @@ def _bridge_show_linux_fastest_workflow_notice(bridge, app_id):
 
 def _bridge_download_game_fastest(bridge, app_id):
     """Fastest download (auto-selects source).
-    Every platform: auto-selects latest manifests and runs
-    process_from_store() - native CDN downloader, DDMod as backup.
+    Windows: LumaCore handoff (register, Steam downloads the files).
+    Linux: auto-selects latest manifests and runs process_from_store() -
+    native CDN downloader, DDMod as backup.
     Emits download_progress + task_finished signals."""
     if not app_id or not app_id.strip().isdigit():
         bridge._emit_task_result("download_fastest", False, f"Invalid App ID: '{app_id}'")
@@ -162,9 +163,18 @@ def _bridge_download_game_fastest(bridge, app_id):
             "app_id": app_id, "status": "Starting", "progress": 0
         }))
 
+        if sys.platform == "win32":
+            return _bridge_run_windows_fastest(bridge, app_id)
         return _bridge_run_linux_fastest(bridge, app_id)
 
     def _on_done(result):
+        if result == "source_empty":
+            bridge._emit_task_result(
+                "download_fastest", False,
+                "The selected source doesn't have this game.",
+                app_id=app_id, source_empty=True,
+            )
+            return
         success = result is True
         if success:
             QTimer.singleShot(1000, bridge._maybe_auto_contribute_provider)
@@ -202,6 +212,11 @@ def _bridge_download_game_with_source(bridge, app_id, source, request_update='0'
         # Local source: bypass all API calls, import directly
         if source == "local":
             return _bridge_run_local_import(bridge, app_id, lua_path, manifest_folder)
+        if sys.platform == "win32":
+            return _bridge_run_windows_fastest(
+                bridge, app_id, source=source, request_update=(request_update == '1'),
+                branch=branch, file_type=file_type,
+            )
         return _bridge_run_linux_fastest(
             bridge, app_id, source=source, request_update=(request_update == '1'),
         )
@@ -353,16 +368,192 @@ def _bridge_run_local_import(bridge, app_id, lua_path, manifest_folder=''):
         return False
 
 
+def _bridge_run_windows_fastest(bridge, app_id, source='', request_update=False, branch='', file_type=''):
+    """Prompt-free LumaCore handoff for Windows: SteaMidra registers the
+    game (lua, depot keys, plugin install, library entry) and Steam itself
+    downloads the files. This is the preferred Windows path; the native
+    downloader is the Linux one."""
+    try:
+        from sff.lua.choices import download_lua_direct
+        from sff.lua.manager import parse_lua_contents
+        from sff.lua.writer import ACFWriter, ConfigVDFWriter
+        from sff.steam_tools_compat import install_lua_to_steam
+        from sff.core.storage.vdf import ensure_library_has_app
+        from sff.core.structs import LuaEndpoint
+
+        steam_path = bridge._steam_path
+        lib_path = Path(bridge._active_library) if bridge._active_library else steam_path
+
+        # Step 1: download lua
+        bridge.download_progress.emit(json.dumps({
+            "app_id": app_id, "status": "Downloading Lua", "progress": 0
+        }))
+        if source == "hubcap":
+            selected_source = LuaEndpoint.HUBCAP
+        elif source == "freelua":
+            selected_source = LuaEndpoint.FREELUA
+        elif source == "ryuu":
+            selected_source = LuaEndpoint.RYUU
+        elif source == "depotbox":
+            selected_source = LuaEndpoint.DEPOTBOX
+        else:
+            selected_source = LuaEndpoint.HUBCAP if bridge._api_key else LuaEndpoint.FREELUA
+        # Download lua into the per-user backup folder, NOT into
+        # <steam>/config/. install_lua_to_steam then copies it into
+        # <steam>/config/stplug-in/. Writing to <steam>/config/ directly
+        # left a stray <steam>/config/<app_id>.lua next to stplug-in/
+        # that the Remove from Library helper never cleans up.
+        saved_lua_root = Path.cwd() / "saved_lua"
+        saved_lua_root.mkdir(exist_ok=True)
+        lua_path = download_lua_direct(
+            dest=saved_lua_root,
+            app_id=app_id,
+            source=selected_source,
+            steam_path=steam_path,
+            request_update=request_update,
+            branch=branch,
+            file_type=file_type,
+        )
+        if not lua_path:
+            # download_lua_direct returns None on timeout against the Steam
+            # CM (30s ceiling) or any other source error. The sentinel tells
+            # _on_done to offer a source switch instead of a dead progress bar.
+            return "source_empty"
+
+        backup_target = saved_lua_root / f"{app_id}.lua"
+        try:
+            if lua_path != backup_target:
+                shutil.copyfile(lua_path, backup_target)
+        except Exception:
+            pass
+
+        # Step 2: parse lua
+        bridge.download_progress.emit(json.dumps({
+            "app_id": app_id, "status": "Parsing Lua", "progress": 0
+        }))
+        lua_contents = lua_path.read_text(encoding="utf-8", errors="replace")
+        parsed = parse_lua_contents(lua_contents, lua_path)
+        if not parsed:
+            return False
+        _auto_update_was_registered = _bridge_auto_update_was_registered(bridge, app_id)
+
+        # Step 4: register app ID for injection
+        bridge.download_progress.emit(json.dumps({
+            "app_id": app_id, "status": "Registering app ID", "progress": 0
+        }))
+        if hasattr(bridge._ui, 'app_list_man') and bridge._ui.app_list_man:
+            try:
+                bridge._ui.app_list_man.add_ids(parsed)
+            except Exception as e:
+                logger.warning("add_ids failed: %s", e)
+
+        # Step 5: write decryption keys
+        bridge.download_progress.emit(json.dumps({
+            "app_id": app_id, "status": "Writing decryption keys", "progress": 0
+        }))
+        config_writer = ConfigVDFWriter(steam_path)
+        keys_ok = True
+        try:
+            config_writer.add_decryption_keys_to_config(parsed)
+        except Exception as e:
+            keys_ok = False
+            logger.warning("add_decryption_keys failed: %s", e)
+
+        # Step 6: backup & install lua to Steam plugin dir
+        bridge.download_progress.emit(json.dumps({
+            "app_id": app_id, "status": "Installing Lua to Steam", "progress": 0
+        }))
+        lua_ok = False
+        try:
+            lua_ok = bool(install_lua_to_steam(steam_path, app_id, lua_path))
+        except Exception as e:
+            logger.warning("install_lua_to_steam failed: %s", e)
+        if lua_ok:
+            _bridge_apply_auto_update_default(bridge, app_id, _auto_update_was_registered)
+
+        if not keys_ok or not lua_ok:
+            # No depot keys means the download decrypts to garbage; no
+            # plugin lua means LumaCore never fakes ownership and Steam
+            # shows Buy. Both usually mean Steam held the files locked.
+            # Returning True here used to toast "the game is in your
+            # library" over a broken install. ensure_library_has_app is
+            # NOT checked the same way: it returns False for an already
+            # registered app, which is a success case.
+            bridge.download_progress.emit(json.dumps({
+                "app_id": app_id,
+                "status": "Registration incomplete - close Steam and download again",
+                "progress": 0, "error": True,
+            }))
+            return False
+
+        # Step 7: patch workshop ACF (write_acf itself no-ops on Windows,
+        # LumaCore owns app state there)
+        bridge.download_progress.emit(json.dumps({
+            "app_id": app_id, "status": "Patching workshop config", "progress": 0
+        }))
+        acf_writer = ACFWriter(lib_path)
+        try:
+            acf_writer.write_acf(parsed)
+        except Exception as e:
+            logger.warning("write_acf failed: %s", e)
+        try:
+            if hasattr(acf_writer, 'patch_workshop_acf'):
+                acf_writer.patch_workshop_acf(parsed)
+        except Exception as e:
+            logger.warning("patch_workshop_acf failed: %s", e)
+
+        # Step 8: register in libraryfolders.vdf
+        bridge.download_progress.emit(json.dumps({
+            "app_id": app_id, "status": "Registering in library", "progress": 0
+        }))
+        try:
+            ensure_library_has_app(steam_path, lib_path, app_id)
+        except Exception as e:
+            logger.warning("ensure_library_has_app failed: %s", e)
+
+        # Step 9: skip manifest download — Lua + depotcache already seeded.
+        # ManifestDownloader would trigger a 20-45s steam_client login that
+        # freezes the UI. The acf_writer + ensure_library_has_app above
+        # already registered everything Steam needs, and Steam/LumaCore pull
+        # the files from here.
+
+        # Step 10: track in download manager
+        bridge.download_progress.emit(json.dumps({
+            "app_id": app_id, "status": "Updating download tracker", "progress": 100
+        }))
+        if hasattr(bridge._ui, 'download_manager') and bridge._ui.download_manager:
+            try:
+                from sff.network.http_utils import get_game_name
+                dl_id = bridge._ui.download_manager.track_external(
+                    app_id=app_id,
+                    game_name=get_game_name(app_id) or f"App {app_id}",
+                )
+                bridge._ui.download_manager.complete_external(dl_id, success=True)
+            except Exception as e:
+                logger.warning("download tracking failed: %s", e)
+
+        # Step 11: done
+        bridge.download_progress.emit(json.dumps({
+            "app_id": app_id, "status": "Complete", "progress": 100
+        }))
+        return True
+
+    except Exception as e:
+        logger.exception("Windows fastest download failed: %s", e)
+        bridge.download_progress.emit(json.dumps({
+            "app_id": app_id, "status": f"Error: {e}", "progress": 0
+        }))
+        return False
+
+
 def _bridge_run_linux_fastest(bridge, app_id, source='', request_update=False):
-    """Native downloader → DDMod pipeline via process_from_store, on every
-    platform. Windows uses it too since 6.6.8: SteaMidra downloads the files
-    itself instead of handing off to Steam/LumaCore.
+    """Native downloader → DDMod pipeline via process_from_store. Linux's
+    download path (no LumaCore there); Windows uses _bridge_run_windows_fastest.
     Distinguishes real, partial, and no-sls runs."""
     # Refuse to run when SLSSteam is not initialized; the old code returned
     # silently and the UI rendered 100% complete despite no work happening.
-    # Windows has no SLSSteam at all, so the guard is Linux-only.
     sls_man = getattr(bridge._ui, "sls_man", None)
-    if sls_man is None and sys.platform != "win32":
+    if sls_man is None:
         bridge.download_progress.emit(json.dumps({
             "app_id": app_id,
             "status": "SLSSteam not initialized — cannot proceed",

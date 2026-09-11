@@ -113,3 +113,6 @@ sff/_gc.py
 download_queue.json
 acf_pending_queue.json
 sff/lua/trionine_depotkeys.json
+
+# Store metadata cache: refreshed at runtime, refetched from GitHub when absent
+store_metadata/

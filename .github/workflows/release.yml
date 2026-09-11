@@ -20,6 +20,8 @@ jobs:
             libxkbcommon-x11-0 libxcb-cursor0 libxcb-xkb1 libxcb-image0 \
             libxcb-keysyms1 libxcb-util1 libxcb-render-util0 libxcb-icccm4 \
             libxcb-shape0 libasound2t64
+      - name: Fetch store metadata seed
+        run: python3.12 tools/fetch_store_metadata.py
       - name: Build Linux AppImage
         run: bash build_linux_appimage.sh --fresh
       - name: Create Linux zip
@@ -46,6 +48,8 @@ jobs:
           python-version: '3.12'
       - name: Install NSIS
         uses: negrutiu/nsis-install@v2
+      - name: Fetch store metadata seed
+        run: python tools/fetch_store_metadata.py
       - name: Run full build_installer.bat
         shell: cmd
         run: |

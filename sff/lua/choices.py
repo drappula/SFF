@@ -246,7 +246,8 @@ def _depotcache_for(steam_path):
     return Path(steam_path) / "depotcache"
 
 
-def _download_from_endpoint(dest, app_id, source, steam_path=None, request_update=None):
+def _download_from_endpoint(dest, app_id, source, steam_path=None, request_update=None,
+                            branch=None, file_type=None):
     if source == LuaEndpoint.FREELUA:
         return get_freelua(dest, app_id, depotcache=_depotcache_for(steam_path))
     if source == LuaEndpoint.HUBCAP:
@@ -257,6 +258,8 @@ def _download_from_endpoint(dest, app_id, source, steam_path=None, request_updat
             app_id,
             depotcache=_depotcache_for(steam_path),
             request_update=request_update,
+            branch=branch,
+            file_type=file_type,
         )
     if source == LuaEndpoint.DEPOTBOX:
         return get_depotbox(dest, app_id)
@@ -283,7 +286,7 @@ def download_lua(dest, os_type):
     return LuaResult(lua_path, None, LuaChoiceReturnCode.LOOP, endpoint=source)
 
 
-def download_lua_direct(dest, app_id, source, steam_path=None, request_update=None):
+def download_lua_direct(dest, app_id, source, steam_path=None, request_update=None, branch=None, file_type=None):
     """Download Lua for a known app_id/source pair without CLI prompts."""
     return _download_from_endpoint(
         dest,
@@ -291,4 +294,6 @@ def download_lua_direct(dest, app_id, source, steam_path=None, request_update=No
         source,
         steam_path=steam_path,
         request_update=request_update,
+        branch=branch,
+        file_type=file_type,
     )
