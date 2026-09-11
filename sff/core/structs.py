@@ -363,6 +363,12 @@ class Settings(Enum):
         False,
         bool,
     )
+    LET_UPDATE_HELPER_DISABLED = SettingItem(
+        "let_update_helper_disabled",
+        "LetUpdate helper Lua removed by user (do not re-add at startup)",
+        False,
+        bool,
+    )
     WINDOW_GEOMETRY = SettingItem(
         "window_geometry",
         "Window geometry (managed automatically)",

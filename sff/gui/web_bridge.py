@@ -555,6 +555,7 @@ class WebBridge(QObject):
         super().__init__(parent)
         self._ui = ui
         self._steam_path = Path(steam_path) if steam_path else None
+        self._ensure_steam_dirs_and_update_lock()
         self._active_library = None
         self._api_key = None
         self._store_client = None
@@ -641,6 +642,36 @@ class WebBridge(QObject):
         # Preload disk-cached fallback data after the first frame.  Parsing
         # games.json can involve tens of MB, so it belongs on a worker too.
         self._preload_all_store_data()
+
+    def _ensure_steam_dirs_and_update_lock(self):
+        """Create Steam/config/stplug-in + Steam/depotcache, and make the
+        LetUpdate helper (which locks every game's manifest pins) the default
+        on Windows. The helper is what the 'Auto Update Games' flow installs
+        by hand; without it LumaCore auto-updates pinned games. Skipped when
+        the user removed it on purpose (the flag is set by Remove Helper Lua
+        and cleared by Add Helper Lua), so the default never fights a choice.
+        """
+        steam_path = self._steam_path
+        if not steam_path:
+            return
+        try:
+            (steam_path / "config" / "stplug-in").mkdir(parents=True, exist_ok=True)
+            (steam_path / "depotcache").mkdir(parents=True, exist_ok=True)
+        except OSError:
+            logger.debug("could not create steam dirs under %s", steam_path, exc_info=True)
+        if sys.platform != "win32":
+            return
+        try:
+            from sff.core.storage.settings import get_setting
+            from sff.core.structs import Settings
+            if get_setting(Settings.LET_UPDATE_HELPER_DISABLED) is True:
+                return
+            from sff.game.update_prompt_override import _override_path, install
+            if not _override_path(steam_path).exists():
+                install(steam_path)
+                logger.debug("LetUpdate helper installed at startup (auto-update locked by default)")
+        except Exception:
+            logger.debug("startup LetUpdate helper ensure failed", exc_info=True)
 
     def _preload_all_store_data(self):
         """Warm store metadata off the GUI thread, once per process window."""

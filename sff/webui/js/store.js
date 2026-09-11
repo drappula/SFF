@@ -26,6 +26,18 @@ window.Store = (function() {
     var _requestSeq = 0;
     var _activeRequestId = '';
     var _initialFetchDone = false;
+    // Search results survive tab switches and the first visit is instant:
+    // pages are cached by query|sort|genre|page|nsfw and warmup() pre-fills
+    // the default first page while the user is still on Home. nsfw is part
+    // of the key because the backend filters rows server-side on some
+    // paths; _reqKey maps an in-flight request id to the cache key its
+    // result should land under.
+    var _cache = {};
+    var _reqKey = {};
+
+    function _cacheKey() {
+        return (_searchQuery || '') + '|' + _sortBy + '|' + _activeGenre + '|' + _page + '|' + (_blockNsfw ? '1' : '0');
+    }
 
     function init() {
         if (_initialized) return;
@@ -96,6 +108,7 @@ window.Store = (function() {
                 this.disabled = true;
                 Bridge.call('store_disconnect');
                 _apiKeyConnected = false;
+                _invalidateCache();
                 disconnectHubcapBtn.classList.add('hidden');
                 var connectBtn = document.getElementById('store-connect-hubcap');
                 if (connectBtn) connectBtn.classList.remove('hidden');
@@ -117,6 +130,7 @@ window.Store = (function() {
                     if (key) {
                         Bridge.call('connect_store', key);
                         _apiKeyConnected = true;
+                        _invalidateCache();
                         connectHubcapBtn.classList.add('hidden');
                         if (disconnectHubcapBtn) disconnectHubcapBtn.classList.remove('hidden');
                         _hideConnectBanner();
@@ -128,6 +142,7 @@ window.Store = (function() {
                         key = key.trim();
                         Bridge.call('connect_store', key);
                         _apiKeyConnected = true;
+                        _invalidateCache();
                         connectHubcapBtn.classList.add('hidden');
                         if (disconnectHubcapBtn) disconnectHubcapBtn.classList.remove('hidden');
                         _hideConnectBanner();
@@ -256,6 +271,7 @@ window.Store = (function() {
                 }
                 Bridge.call('connect_store', key);
                 _apiKeyConnected = true;
+                _invalidateCache();
                 _hideConnectBanner();
                 _fetchGames();
                 Components.showToast('success', 'API key saved. Loading store...');
@@ -264,44 +280,34 @@ window.Store = (function() {
 
         // Listen for search results
         Bridge.on('search_results', function(json) {
-            if (!_active) return;
             try {
                 var data = JSON.parse(json);
-                if (data.request_id && data.request_id !== _activeRequestId) return;
-                _initialFetchDone = true;
-                _hideLoading();
+                var rid = data.request_id;
+                var ck = _reqKey[rid];
+                if (rid) delete _reqKey[rid];
                 if (data.error) {
-                    Components.showToast('error', data.error);
-                }
-                var games = data.games || [];
-                if (_blockNsfw) {
-                    games = games.filter(function(g) { return !g.nsfw && !_looksNsfwByName(g); });
-                }
-                _renderGames(games);
-                _total = data.total || games.length;
-                _totalPages = Math.max(1, Math.ceil(_total / _perPage));
-                _updatePagination();
-                var discBtn = document.getElementById('store-disconnect-hubcap');
-                var connBtn = document.getElementById('store-connect-hubcap');
-                if (data.has_hubcap || data.has_fallback_data) {
-                    _hideConnectBanner();
-                    if (data.has_hubcap) {
-                        if (discBtn) discBtn.classList.remove('hidden');
-                        if (connBtn) connBtn.classList.add('hidden');
-                    } else {
-                        if (discBtn) discBtn.classList.add('hidden');
-                        if (connBtn) connBtn.classList.remove('hidden');
+                    if (_active && rid === _activeRequestId) {
+                        _hideLoading();
+                        Components.showToast('error', data.error);
                     }
-                } else {
-                    _showConnectBanner();
-                    var msgEl = document.getElementById('store-banner-msg');
-                    if (msgEl) {
-                        msgEl.textContent = 'You can browse all games without a key — Hubcap shows which ones have manifests ready to download.';
-                    }
+                    return;
                 }
+                if (ck) {
+                    _cache[ck] = {
+                        games: data.games || [],
+                        total: data.total || (data.games || []).length,
+                        has_hubcap: data.has_hubcap,
+                        has_fallback_data: data.has_fallback_data,
+                    };
+                }
+                if (!_active || rid !== _activeRequestId) return;  // warmup or stale: cache only
+                _initialFetchDone = true;
+                _applyPage(ck);
             } catch(e) {
-                _hideLoading();
-                Components.showToast('error', 'Failed to parse search results');
+                if (_active) {
+                    _hideLoading();
+                    Components.showToast('error', 'Failed to parse search results');
+                }
             }
         });
 
@@ -331,7 +337,6 @@ window.Store = (function() {
     function onPageEnter() {
         init();
         _active = true;
-        _page = 1;
         _showLoading();
         // Let Chromium paint the Store shell before QWebChannel dispatches
         // any native work.  This also keeps navigation feedback immediate on
@@ -341,21 +346,28 @@ window.Store = (function() {
 
     function _startPageLoad() {
         if (!_active) return;
-        Bridge.callWithCallback('get_setting', 'hide_store_images', function(val) {
+        var pending = 2;
+        function done() {
+            if (--pending) return;
             if (!_active) return;
+            _loadProviderStatus();
+            // Renders straight from cache when warmup or a previous visit
+            // filled it; only a cold page shows the loading screen.
+            _fetchGames();
+        }
+        Bridge.callWithCallback('get_setting', 'hide_store_images', function(val) {
             _imagesHidden = (val === 'True');
             Components.setHideImages(_imagesHidden);
             var btn = document.getElementById('store-toggle-images');
             if (btn) btn.classList.toggle('active', _imagesHidden);
+            done();
         });
         Bridge.callWithCallback('get_setting', 'store_block_nsfw', function(val) {
-            if (!_active) return;
             _blockNsfw = (val !== 'False');
             var btn = document.getElementById('store-toggle-nsfw');
             if (btn) btn.classList.toggle('active', _blockNsfw);
+            done();
         });
-        _loadProviderStatus();
-        _fetchGames();
     }
 
     function onPageLeave() {
@@ -364,6 +376,9 @@ window.Store = (function() {
         _lastGames = [];
         _initialFetchDone = false;
         _releaseStoreImages();
+        // The DOM is torn down to keep WebEngine memory flat, but _cache,
+        // _page, _searchQuery, _sortBy and _activeGenre survive: coming back
+        // to the Store restores the exact view without a reload.
         var grid = document.getElementById('store-grid');
         var list = document.getElementById('store-list');
         var loading = document.getElementById('store-loading');
@@ -379,8 +394,8 @@ window.Store = (function() {
     }
 
     function _fetchGames() {
-        var requestId = String(++_requestSeq);
-        _activeRequestId = requestId;
+        var ck = _cacheKey();
+        if (_cache[ck]) { _applyPage(ck); return; }
         if (_blockNsfw && _nsfwNameRe.test(_searchQuery || '')) {
             _hideLoading();
             _renderGames([]);
@@ -390,9 +405,64 @@ window.Store = (function() {
             _hideConnectBanner();
             return;
         }
+        var requestId = String(++_requestSeq);
+        _activeRequestId = requestId;
+        _reqKey[requestId] = ck;
         _showLoading();
         var offset = (_page - 1) * _perPage;
         Bridge.call('search_games', _searchQuery, offset, _perPage, _sortBy, _activeGenre, requestId);
+    }
+
+    // Render a cached page and sync the banner/pagination to it. No loading
+    // screen: the data is already here. The nsfw filter runs here, against
+    // the current toggle, not the one in effect when the fetch started.
+    function _applyPage(ck) {
+        var entry = _cache[ck];
+        if (!entry) return;
+        var games = entry.games;
+        if (_blockNsfw) {
+            games = games.filter(function(g) { return !g.nsfw && !_looksNsfwByName(g); });
+        }
+        _hideLoading();
+        _renderGames(games);
+        _total = entry.total;
+        _totalPages = Math.max(1, Math.ceil(_total / _perPage));
+        _updatePagination();
+        var discBtn = document.getElementById('store-disconnect-hubcap');
+        var connBtn = document.getElementById('store-connect-hubcap');
+        if (entry.has_hubcap || entry.has_fallback_data) {
+            _hideConnectBanner();
+            if (entry.has_hubcap) {
+                if (discBtn) discBtn.classList.remove('hidden');
+                if (connBtn) connBtn.classList.add('hidden');
+            } else {
+                if (discBtn) discBtn.classList.add('hidden');
+                if (connBtn) connBtn.classList.remove('hidden');
+            }
+        } else {
+            _showConnectBanner();
+            var msgEl = document.getElementById('store-banner-msg');
+            if (msgEl) {
+                msgEl.textContent = 'You can browse all games without a key — Hubcap shows which ones have manifests ready to download.';
+            }
+        }
+    }
+
+    // Pre-fill the default first page while the user is still on Home, so the
+    // first Store visit renders from cache. A duplicate with a real request is
+    // cheap: the backend coalesces and the cache dedupes on arrival.
+    function warmup() {
+        if (_cache[_cacheKey()]) return;
+        if (_blockNsfw && _nsfwNameRe.test(_searchQuery || '')) return;
+        var requestId = String(++_requestSeq);
+        _reqKey[requestId] = _cacheKey();
+        Bridge.call('search_games', _searchQuery, 0, _perPage, _sortBy, _activeGenre, requestId);
+    }
+
+    // Provider or data changes invalidate every cached page.
+    function _invalidateCache() {
+        _cache = {};
+        _reqKey = {};
     }
 
     function _looksNsfwByName(game) {
@@ -590,11 +660,18 @@ window.Store = (function() {
         _renderProviderStatus(data);
     }
 
+    // Called after a store-metadata refresh: cached pages are stale.
+    function _refresh() {
+        _invalidateCache();
+        _fetchGames();
+    }
+
     return {
         init: init,
         onPageEnter: onPageEnter,
         onPageLeave: onPageLeave,
-        refresh: _fetchGames,
+        refresh: _refresh,
+        warmup: warmup,
         onApiKeyAvailable: onApiKeyAvailable
     };
 })();

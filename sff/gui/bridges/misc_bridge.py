@@ -709,7 +709,17 @@ def _bridge_let_updates_set_helper(bridge, enabled):
     try:
         from sff.lua.update_pins import set_helper_enabled
 
-        return json.dumps(set_helper_enabled(bridge._steam_path, bool(enabled)))
+        result = set_helper_enabled(bridge._steam_path, bool(enabled))
+        # The startup default re-adds a missing helper; a deliberate
+        # removal must survive restarts, an add must clear that opt-out.
+        if result.get("ok"):
+            try:
+                from sff.core.storage.settings import set_setting
+                from sff.core.structs import Settings
+                set_setting(Settings.LET_UPDATE_HELPER_DISABLED, not bool(enabled))
+            except Exception:
+                logger.debug("could not persist helper opt-out flag", exc_info=True)
+        return json.dumps(result)
     except Exception as e:
         logger.exception("let_updates_set_helper failed: %s", e)
         return json.dumps({"ok": False, "error": str(e), "enabled": False})
@@ -1934,6 +1944,13 @@ def _bridge_browse_steam_path(bridge, _unused=""):
         bridge._installed_games_cache = None
     except Exception:
         pass
+    # The startup hook ran against the old folder; re-run so the new
+    # install gets stplug-in/depotcache and the auto-update lock too.
+    # Idempotent and opt-out-aware, so this never fights a user choice.
+    try:
+        bridge._ensure_steam_dirs_and_update_lock()
+    except Exception:
+        logger.debug("steam dirs/helper after path change failed", exc_info=True)
     return str(resolved)
 
 def _bridge_open_file_dialog(bridge):

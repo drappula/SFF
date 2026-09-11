@@ -171,6 +171,9 @@ window.App = (function() {
                 if (apiKey) {
                     Store.onApiKeyAvailable(apiKey);
                 }
+                // Warm the Store's default first page now, while the user is
+                // still on Home, so the first visit renders from cache.
+                Store.warmup();
             });
 
             // Populate game dropdown on Home page

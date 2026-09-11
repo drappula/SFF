@@ -6,6 +6,8 @@
 
 - **Ryuu leads Free Providers** - Ryuu's download endpoint needs no API key and ships the game's lua plus real .manifest files, so it now runs first in the Free Providers chain. Keyless users get manifests seeded into depotcache too.
 - **Dead provider keys** - Hubcap, Ryuu and DepotBox keys are checked a few seconds after launch and whenever a download uses them. A rejected key shows a dialog offering the provider's site, and that provider stops auto-selecting in download pickers and falls back to Free Providers until a working key is saved.
+- **Games no longer auto-update by default** - on Windows, SteaMidra now installs the manifest-pin helper at startup, so added games stay on their pinned version instead of Steam updating them. Removing the helper in Auto Update Games is respected across restarts. Steam's config and depotcache folders are also created up front.
+- **Store loads without a spinner** - the Store's first page is fetched in the background at startup and results are kept when you switch tabs, so opening the Store or returning to it shows your last search instead of a loading screen.
 
 ### Fixed
 
