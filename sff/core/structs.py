@@ -186,10 +186,13 @@ class Settings(Enum):
     ADVANCED_MODE = SettingItem("advanced_mode", "Advanced Mode", False, bool)
     HUBCAP_KEY = SettingItem("morrenus_key", "Hubcap API Key", True, str)
     HUBCAP_DISABLED = SettingItem("hubcap_disabled", "Hubcap Store Disabled", False, bool)
+    HUBCAP_KEY_DEAD = SettingItem("hubcap_key_dead", "Hubcap Key Rejected", False, bool)
     RYUU_KEY = SettingItem("ryuu_key", "Ryuu Reseller Key", True, str)
     RYUU_API_KEY = SettingItem("ryuu_api_key", "Ryuu API Key (premium)", True, str)
+    RYUU_KEY_DEAD = SettingItem("ryuu_key_dead", "Ryuu Key Rejected", False, bool)
     DEPOTBOX_KEY = SettingItem("depotbox_key", "DepotBox API Key", True, str)
     DEPOTBOX_RATE_LIMIT = SettingItem("depotbox_rate_limit", "DepotBox Rate Limit (requests per minute)", False, str)
+    DEPOTBOX_KEY_DEAD = SettingItem("depotbox_key_dead", "DepotBox Key Rejected", False, bool)
     LUA_FOLDER_MIGRATION_KNOWN = SettingItem(
         "lua_folder_migration_known",
         "Lua folder migration — handled file names (JSON list)",

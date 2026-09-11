@@ -504,6 +504,35 @@ def _pick_crack_fix(entry):
     return sorted(fixes, key=_rank)[0]
 
 
+# Where to regenerate each provider key.
+_PROVIDER_KEY_SITES = {
+    "Hubcap": "https://hubcapmanifest.com/",
+    "Ryuu": "https://generator.ryuu.lol",
+    "DepotBox": "https://depotbox.org",
+}
+
+# Persisted "this provider's key got a definite rejection" flags, written by
+# the startup validator and read by the source pickers. Separate from the
+# user-facing hubcap_disabled toggle: that one is a manual disconnect, these
+# are cleared as soon as a key validates. Settings enum resolved lazily
+# because this module imports it per-function.
+def _provider_key_dead_settings():
+    from sff.core.structs import Settings
+    return {
+        "Hubcap": Settings.HUBCAP_KEY_DEAD,
+        "Ryuu": Settings.RYUU_KEY_DEAD,
+        "DepotBox": Settings.DEPOTBOX_KEY_DEAD,
+    }
+
+
+def _set_provider_key_dead(name, dead):
+    try:
+        from sff.core.storage.settings import set_setting
+        set_setting(_provider_key_dead_settings()[name], bool(dead))
+    except Exception:
+        logger.debug("could not persist %s key-dead flag", name, exc_info=True)
+
+
 class WebBridge(QObject):
     """QObject subclass registered via QWebChannel.
     JS accesses this as ``channel.objects.bridge``.
@@ -520,6 +549,7 @@ class WebBridge(QObject):
     task_progress = pyqtSignal(str)
     log_message = pyqtSignal(str)
     lc_progress = pyqtSignal(str)
+    provider_key_dead = pyqtSignal(list)
 
     def __init__(self, ui, steam_path, parent=None):
         super().__init__(parent)
@@ -530,6 +560,11 @@ class WebBridge(QObject):
         self._store_client = None
         self._hubcap_unavailable = self._is_hubcap_disabled()
         self._get_store_client()
+        # A dead Hubcap key used to show up only as silent fallbacks (empty
+        # store, download cascade skipping Hubcap). Validate the saved key
+        # once shortly after startup and tell the user what to do about it.
+        QTimer.singleShot(3000, self._check_provider_keys_startup)
+        self.provider_key_dead.connect(self._warn_provider_key_dead)
         self._hubcap_check_timer = QTimer(self)
         self._hubcap_check_timer.setInterval(15_000)
         self._hubcap_check_timer.timeout.connect(self._check_hubcap_key)
@@ -858,6 +893,158 @@ class WebBridge(QObject):
                 from sff.network.store_browser import StoreApiClient
                 self._store_client = StoreApiClient(self._api_key)
         return self._store_client if not self._hubcap_unavailable else None
+
+    def _check_provider_keys_startup(self):
+        """Validate every saved provider key once, a few seconds after launch.
+
+        One worker does the probes serially so the app never fires three
+        HTTP requests at once and the dialogs can't stack. Only a definite
+        rejection pops the dialog: a dead or absent key, and server or
+        network hiccups, stay silent so the app boots normally and retries
+        on the next launch.
+        """
+        from sff.core.storage.settings import get_setting
+        from sff.core.structs import Settings
+
+        def _get(setting):
+            try:
+                v = get_setting(setting)
+                return v.strip() if isinstance(v, str) and v.strip() else ""
+            except Exception:
+                return ""
+
+        jobs = []
+        if not self._hubcap_unavailable and self._api_key:
+            jobs.append(("Hubcap", self._api_key))
+        ryuu_keys = [k for k in (_get(Settings.RYUU_KEY), _get(Settings.RYUU_API_KEY)) if k]
+        if ryuu_keys:
+            jobs.append(("Ryuu", ryuu_keys))
+        depotbox = _get(Settings.DEPOTBOX_KEY)
+        if depotbox:
+            jobs.append(("DepotBox", depotbox))
+        if not jobs:
+            return
+
+        def _probe_hubcap(key):
+            from sff.network.store_browser import StoreApiClient
+            ok, reason = StoreApiClient.validate_api_key(key)
+            if ok:
+                return "ok"
+            return "rejected" if reason == "invalid" else "unknown"
+
+        def _probe_ryuu(keys):
+            import httpx as _httpx
+
+            def _key_status(key):
+                # Two endpoints, two key types (reseller auth_code param,
+                # premium X-Auth-Key header). Each key gets both tries,
+                # like get_ryuu does at download time. 200 => ok; auth-
+                # flavoured 401/403 on both => dead; anything else (5xx,
+                # 400 appid-not-in-db, network) => unknown, and unknown
+                # must never blame the key.
+                try:
+                    old = _httpx.get("https://generator.ryuu.lol/resellerrequestupdate",
+                        params={"appid": "440", "auth_code": key}, timeout=30,
+                        follow_redirects=True)
+                    if old.status_code == 200:
+                        return "ok"
+                    if not (old.status_code in (401, 403) or "key" in (old.text or "").lower()):
+                        return "unknown"
+                    new = _httpx.get("https://generator.ryuu.lol/requestupdate",
+                        params={"appid": "440"}, headers={"X-Auth-Key": key},
+                        timeout=30, follow_redirects=True)
+                    if new.status_code == 200:
+                        return "ok"
+                    if new.status_code in (401, 403) or "key" in (new.text or "").lower():
+                        return "rejected"
+                    return "unknown"
+                except Exception:
+                    return "unknown"
+
+            statuses = [_key_status(k) for k in keys]
+            if "ok" in statuses:
+                return "ok"
+            if "unknown" in statuses:
+                return "unknown"
+            return "rejected"
+
+        def _probe_depotbox(key):
+            import httpx as _httpx
+            try:
+                r = _httpx.get("https://depotbox.org/api/direct-lua?appid=440",
+                    headers={"X-API-Key": key}, timeout=30, follow_redirects=True)
+            except Exception:
+                return "unknown"
+            if r.status_code == 200 or r.status_code == 404:
+                return "ok"
+            if r.status_code in (401, 403):
+                return "rejected"
+            return "unknown"
+
+        probes = {
+            "Hubcap": _probe_hubcap,
+            "Ryuu": _probe_ryuu,
+            "DepotBox": _probe_depotbox,
+        }
+
+        def _do():
+            dead = []
+            for name, key in jobs:
+                try:
+                    verdict = probes[name](key)
+                except Exception:
+                    verdict = "unknown"
+                logger.debug("startup provider key probe %s: %s", name, verdict)
+                # Only a definite answer moves the flag. A network or
+                # provider outage leaves it as-is, so a hiccup can neither
+                # disable a working key nor re-enable a dead one.
+                if verdict != "unknown":
+                    _set_provider_key_dead(name, verdict == "rejected")
+                if verdict == "rejected":
+                    dead.append(name)
+            return dead
+
+        def _done(dead):
+            if not dead:
+                return
+            # on_done runs on the worker thread; QMessageBox must not. The
+            # signal emits queued to the GUI thread (bridge lives there).
+            self.provider_key_dead.emit(list(dead))
+
+        self._run_async(_do, on_done=_done, on_error=lambda e: None)
+
+    def _warn_provider_key_dead(self, names):
+        """Dialog: 'your <provider> key no longer works' + Open site / Ignore.
+
+        Called on the GUI thread from the startup validator's completion.
+        Deliberately does NOT disable the providers: a user who clicks
+        Ignore should keep the client until the per-query fallbacks kick
+        in on their own.
+        """
+        try:
+            from PyQt6.QtWidgets import QMessageBox
+            from PyQt6.QtGui import QDesktopServices
+            from PyQt6.QtCore import QUrl
+            parent = self.parent()
+            for name in names:
+                label = "Ryuu reseller or premium API key" if name == "Ryuu" else f"{name} API key"
+                dlg = QMessageBox(parent.window() if parent is not None else None)
+                dlg.setWindowTitle(f"{name} API key invalid")
+                dlg.setIcon(QMessageBox.Icon.Warning)
+                dlg.setText(
+                    f"Your saved {label} was rejected and no longer "
+                    "works. Downloads using it will fall back to free "
+                    "sources until you fix it. Paste a new key in "
+                    "Settings."
+                )
+                btn_site = dlg.addButton(
+                    f"Open {name} site", QMessageBox.ButtonRole.ActionRole)
+                dlg.addButton("Ignore", QMessageBox.ButtonRole.RejectRole)
+                dlg.exec()
+                if dlg.clickedButton() is btn_site:
+                    QDesktopServices.openUrl(QUrl(_PROVIDER_KEY_SITES[name]))
+        except Exception:
+            logger.debug("provider dead-key dialog failed", exc_info=True)
 
     def _check_hubcap_key(self):
         if not self._hubcap_unavailable:

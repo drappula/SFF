@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### New
+
+- **Ryuu leads Free Providers** - Ryuu answers its download endpoint without any API key and ships the game's lua plus real .manifest files, so it now runs first in the Free Providers chain. Keyless users get their depotcache seeded with manifests, previously a keys-only perk.
+- **Dead provider keys** - Hubcap, Ryuu and DepotBox keys are checked a few seconds after launch and whenever a download uses them. A rejected key shows a dialog offering the provider's site, and that provider stops auto-selecting in download pickers and falls back to Free Providers until a working key is saved.
+
+### Fixed
+
+- **Downloads stalling on "Parsing Lua..."** - the check for whether a game is already registered re-scanned the whole Steam plug-in folder and the full game list to answer one yes-or-no question; it now reads that game's file directly.
+- **Loud warning when Steam won't close** - download setup logs a warning if the kill leaves Steam running, instead of letting the locked config writes fail quietly.
+- **Recently Updated stuck at old dates** - the Store list now sorts and labels by Steam's last-modified stamp, so dates track actual updates.
+
 ## 6.6.7d
 
 ### New

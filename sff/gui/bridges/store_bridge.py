@@ -1588,6 +1588,7 @@ def _bridge_connect_store(bridge, api_key):
         set_setting(Settings.HUBCAP_KEY, api_key)
         try:
             clear_setting(Settings.HUBCAP_DISABLED)
+            clear_setting(Settings.HUBCAP_KEY_DEAD)
         except Exception:
             pass
         bridge.task_finished.emit(json.dumps({"task": "api_key_connected"}))

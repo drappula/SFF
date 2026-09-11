@@ -45,8 +45,24 @@ def steam_game_has_pins(steam_path: str | os.PathLike[str] | None, app_id: str |
     if not target.isdigit():
         return False
     try:
-        from sff.lua.update_pins import discover_games
+        from sff.lua.update_pins import (
+            _count_pins, _looks_like_game_lua, _read_text, discover_games,
+            stplugin_root,
+        )
 
+        # The full discover_games sweep reads and regexes every lua in
+        # stplug-in and, on its first call, parses the 198k-entry
+        # games.json just to label games this check never shows. It ran
+        # under the download's "Parsing Lua..." status and stalled the row
+        # for seconds on slow disks. Registered luas are <appid>.lua, so
+        # open those directly; only an app with no appid-named file (a
+        # title-named import) pays the sweep.
+        root = stplugin_root(steam_path)
+        if root is not None and root.is_dir():
+            candidates = [p for p in (root / f"{target}.lua", *root.glob(f"*/{target}.lua"))
+                          if p.is_file() and _looks_like_game_lua(p)]
+            if candidates:
+                return any(sum(_count_pins(_read_text(p))) > 0 for p in candidates)
         return any(str(g.get("app_id") or "") == target for g in discover_games(steam_path))
     except Exception as exc:
         logger.debug("steam_game_has_pins failed for %s: %s", target, exc)

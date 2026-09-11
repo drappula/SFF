@@ -1375,6 +1375,15 @@ def _bridge_get_disk_usage(bridge, path):
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 _DISK_POOL = _ThreadPoolExecutor(max_workers=2)
 
+def _clear_ryuu_key_dead():
+    try:
+        from sff.core.storage.settings import clear_setting
+        from sff.core.structs import Settings
+        clear_setting(Settings.RYUU_KEY_DEAD)
+    except Exception:
+        logger.debug("could not clear ryuu key-dead flag", exc_info=True)
+
+
 def _bridge_save_ryuu_key(bridge, key):
     """Save Ryuu API key to settings."""
     from sff.core.storage.settings import set_setting as _set
@@ -1433,6 +1442,8 @@ def _bridge_test_ryuu_key(bridge):
 
     def _on_done(result):
         result = result or {"ok": False, "error": "unknown"}
+        if result.get("ok"):
+            _clear_ryuu_key_dead()
         bridge._emit_task_result(
             "test_ryuu_key",
             bool(result.get("ok")),
@@ -1463,6 +1474,8 @@ def _bridge_test_ryuu_api_key(bridge):
             return {"ok": False, "error": str(e)}
     def _on_done(result):
         result = result or {"ok": False, "error": "unknown"}
+        if result.get("ok"):
+            _clear_ryuu_key_dead()
         bridge._emit_task_result("test_ryuu_api_key", bool(result.get("ok")), "",
             **{k: v for k, v in result.items() if k != "ok"}, ok=bool(result.get("ok")))
     bridge._run_async(_do, on_done=_on_done)

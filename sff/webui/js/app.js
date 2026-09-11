@@ -794,20 +794,26 @@ window.App = (function() {
         window._updateDownloadSourceHint = _updateDownloadSourceHint;
 
         // Auto-pick the download source by saved API key: a provider the
-        // user has a key for beats the Free Providers default. Priority Hubcap >
-        // Ryuu > DepotBox; if none have a key, leave the HTML default
-        // (Free Providers) and its hint. Fires the change handler so the Ryuu/local
-        // option rows show/hide correctly. _getProviderKeys pulls the three
-        // keys in one call (get_all_settings masks hidden keys, so presence
-        // is read as "non-empty string", which a real key satisfies).
+        // user has a working key for beats the Free Providers default.
+        // Priority Hubcap > Ryuu > DepotBox; providers whose key got a
+        // definite rejection at startup or download time are skipped
+        // (*_key_dead flags, cleared again by any key that validates), so
+        // a dead key never re-selects itself. If nothing is eligible, leave
+        // the HTML default (Free Providers) and its hint. Fires the change
+        // handler so the Ryuu/local option rows show/hide correctly.
+        // _getProviderKeys pulls the three keys in one call (get_all_settings
+        // masks hidden keys, so presence is read as "non-empty string", which
+        // a real key satisfies; non-hidden bool flags come back as "True").
         function _applySourceAutoPick(groupName, cb) {
             Bridge.callSync('get_all_settings', function(json) {
                 var s;
                 try { s = JSON.parse(json || '{}'); } catch(e) { s = {}; }
+                var dead = function(k) { return String(s[k]).toLowerCase() === 'true'; };
                 var has = function(k) { return !!(s[k] && String(s[k]).trim()); };
-                var pick = has('morrenus_key') ? 'hubcap'
-                    : (has('ryuu_key') || has('ryuu_api_key')) ? 'ryuu'
-                    : has('depotbox_key') ? 'depotbox' : '';
+                var pick = '';
+                if (has('morrenus_key') && !dead('hubcap_key_dead')) pick = 'hubcap';
+                else if ((has('ryuu_key') || has('ryuu_api_key')) && !dead('ryuu_key_dead')) pick = 'ryuu';
+                else if (has('depotbox_key') && !dead('depotbox_key_dead')) pick = 'depotbox';
                 if (pick) {
                     var radio = document.querySelector(
                         'input[name="' + groupName + '"][value="' + pick + '"]');

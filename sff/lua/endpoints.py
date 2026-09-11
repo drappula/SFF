@@ -44,6 +44,29 @@ def _update_fallback_depotkeys(lua_bytes):
         pass
 
 
+def _set_provider_key_flag(setting, dead):
+    # Persisted "key rejected" flag the source pickers read; set on a
+    # definite 401/403, cleared the moment a download proves the key works.
+    try:
+        from sff.core.storage.settings import set_setting, clear_setting
+        if dead:
+            set_setting(setting, True)
+        else:
+            clear_setting(setting)
+    except Exception:
+        logger.debug("provider key flag write failed", exc_info=True)
+
+
+def _freelua_after_dead_key(dest, app_id, depotcache=None):
+    # A rejected key is the provider's last word on this app; the free
+    # chain is keyless and independent, so finish with it when present.
+    print(Fore.YELLOW + f"API key rejected; falling back to Free Providers for {app_id}." + Style.RESET_ALL)
+    try:
+        return get_freelua(dest, app_id, depotcache=depotcache)
+    except Exception:
+        return None
+
+
 def get_hubcap(dest, app_id, depotcache = None, hubcap_key = None):
     if not app_id or not str(app_id).strip().isdigit():
         print(Fore.RED + f"Invalid App ID: '{app_id}'" + Style.RESET_ALL)
@@ -92,17 +115,18 @@ def get_hubcap(dest, app_id, depotcache = None, hubcap_key = None):
             return None
         if stats_resp.status_code == 401:
             print(Fore.RED + "\nHubcap API key is invalid or expired." + Style.RESET_ALL)
+            _set_provider_key_flag(Settings.HUBCAP_KEY_DEAD, True)
             _attempts += 1
             if _attempts >= _max_attempts:
                 print(Fore.YELLOW + f"Max API key entry attempts ({_max_attempts}) reached. Please update your key in Settings." + Style.RESET_ALL)
-                return None
+                return _freelua_after_dead_key(dest, app_id, depotcache)
             if prompt_confirm("Do you want to enter a new API key?"):
                 set_setting(Settings.HUBCAP_KEY, "")
                 hubcap_key = ""
                 continue
             else:
                 print(Fore.YELLOW + "\nYou can update your API key in Settings later." + Style.RESET_ALL)
-                return None
+                return _freelua_after_dead_key(dest, app_id, depotcache)
         elif stats_resp.status_code != 200:
             detail = ""
             try:
@@ -133,6 +157,7 @@ def get_hubcap(dest, app_id, depotcache = None, hubcap_key = None):
                 )
             return None
         data = stats_resp.json()
+        _set_provider_key_flag(Settings.HUBCAP_KEY_DEAD, False)
         break
 
     usage = data.get("daily_usage")
@@ -455,10 +480,12 @@ def _seed_free_manifest(depot_id, gid, app_id, depotcache):
 
 def get_freelua(dest, app_id, depotcache=None):
     """Keyless Lua from the free community providers, in priority order:
-    trionine ManifestHub (built client-side from depotkeys.json + steamcmd
-    gids, like the site itself), revobd pre-built bundle (ships .manifest
-    files), then the ManifestHub / ManifestHub3 per-app git branches.
-    Any bundled manifests are seeded into depotcache along the way."""
+    Ryuu's generator (its download endpoint answers without a key and
+    ships the lua plus real .manifest files), trionine ManifestHub (built
+    client-side from depotkeys.json + steamcmd gids, like the site
+    itself), revobd pre-built bundle, then the ManifestHub / ManifestHub3
+    per-app git branches. Any bundled manifests are seeded into
+    depotcache along the way."""
     if not app_id or not str(app_id).strip().isdigit():
         print(Fore.RED + f"Invalid App ID: '{app_id}'" + Style.RESET_ALL)
         return None
@@ -468,7 +495,29 @@ def get_freelua(dest, app_id, depotcache=None):
         print(Fore.GREEN + f"[Cached] Using existing Lua for {app_id}" + Style.RESET_ALL)
         return lua_path
 
-    # 1) trionine: depot keys from the shared dump, live gids from steamcmd
+    # 1) Ryuu, keyless: the /api/download endpoint serves the same zip the
+    # premium route uses and ignores the auth key (verified: no key and a
+    # bogus key return byte-identical bundles). Unknown appids answer 404
+    # JSON fast, so a miss costs one round trip.
+    try:
+        resp = httpx.get(
+            f"https://generator.ryuu.lol/api/download/{app_id}",
+            timeout=60, follow_redirects=True,
+        )
+        if resp.status_code == 200 and resp.content:
+            text = read_lua_from_zip(io.BytesIO(resp.content), decode=True, depotcache=depotcache)
+            if text:
+                lua_path.write_text(text, encoding="utf-8")
+                _update_fallback_depotkeys(text.encode("utf-8", errors="ignore"))
+                print(Fore.GREEN + f"[OK] Free Providers: Ryuu bundle for {app_id} (manifests included)" + Style.RESET_ALL)
+                return lua_path
+            logger.debug("freelua: ryuu HTTP 200 but no .lua in bundle for %s", app_id)
+        elif resp.status_code != 404:
+            logger.debug("freelua: ryuu bundle HTTP %s for %s", resp.status_code, app_id)
+    except Exception as e:
+        print(Fore.YELLOW + f"Ryuu bundle unreachable ({e})." + Style.RESET_ALL)
+
+    # 2) trionine: depot keys from the shared dump, live gids from steamcmd
     info = _steamcmd_appinfo(app_id)
     if info:
         depots_info = info.get("depots") or {}
@@ -509,7 +558,7 @@ def get_freelua(dest, app_id, depotcache=None):
             print(Fore.GREEN + f"[OK] Free Providers: trionine data built Lua for {app_id} ({len(pins)} pinned manifest(s))" + Style.RESET_ALL)
             return lua_path
 
-    # 2) revobd: pre-built zip with the lua + real manifest files
+    # 3) revobd: pre-built zip with the lua + real manifest files
     try:
         resp = httpx.get(
             f"https://api.luagen.revobd.club/{app_id}.zip",
@@ -524,7 +573,7 @@ def get_freelua(dest, app_id, depotcache=None):
     except Exception as e:
         print(Fore.YELLOW + f"revobd bundle unreachable ({e})." + Style.RESET_ALL)
 
-    # 3+4) ManifestHub / ManifestHub3: one branch per app id with lua + key.vdf
+    # 4+5) ManifestHub / ManifestHub3: one branch per app id with lua + key.vdf
     for repo, label in _MH_BRANCH_REPOS:
         try:
             resp = httpx.get(
@@ -591,7 +640,8 @@ def get_depotbox(dest, app_id, depotbox_key=None):
         if resp.status_code == 401:
             print(Fore.RED + "DepotBox: Invalid API key." + Style.RESET_ALL)
             set_setting(Settings.DEPOTBOX_KEY, "")
-            return None
+            _set_provider_key_flag(Settings.DEPOTBOX_KEY_DEAD, True)
+            return _freelua_after_dead_key(dest, app_id)
         if resp.status_code == 403:
             print(Fore.RED + f"DepotBox: {resp.text[:300]}" + Style.RESET_ALL)
             return None
@@ -604,6 +654,7 @@ def get_depotbox(dest, app_id, depotbox_key=None):
         if resp.status_code != 200:
             print(Fore.RED + f"DepotBox: HTTP {resp.status_code} — {resp.text[:300]}" + Style.RESET_ALL)
             return None
+        _set_provider_key_flag(Settings.DEPOTBOX_KEY_DEAD, False)
 
         lua_text = resp.text.strip()
         if not lua_text or not lua_text.startswith("--"):

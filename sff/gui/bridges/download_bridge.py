@@ -1970,6 +1970,7 @@ def _bridge_download_game_ddmod(bridge, app_id, source, lua_path, manifest_folde
             bridge.download_progress.emit(json.dumps({
                 "app_id": app_id, "status": "Parsing Lua...", "progress": 0
             }))
+            logger.debug("ddmod %s: parsing lua %s", app_id, lua_file)
 
             lua_install_file = lua_file
             # Archives: extract lua text and seed depotcache with any embedded manifests
@@ -1986,7 +1987,9 @@ def _bridge_download_game_ddmod(bridge, app_id, source, lua_path, manifest_folde
             parsed = parse_lua_contents(lua_text, lua_file)
             if not parsed or not parsed.depots:
                 return (False, "Failed to parse Lua — no depot info found")
+            logger.debug("ddmod %s: lua parsed, %d depot(s); checking update pins", app_id, len(parsed.depots))
             _auto_update_was_registered = _bridge_auto_update_was_registered(bridge, app_id)
+            logger.debug("ddmod %s: had pins=%s; stopping Steam", app_id, _auto_update_was_registered)
 
             # ── Steam registration (LumaCore on Windows / SLSSteam on Linux) ──
             # Without these the library card shows "Buy" because Steam never
@@ -2019,6 +2022,10 @@ def _bridge_download_game_ddmod(bridge, app_id, source, lua_path, manifest_folde
                         _w = 0.0
                         while is_proc_running("steam") and _w < 5.0:
                             _t3.sleep(0.1); _w += 0.1
+                        if is_proc_running("steam"):
+                            logger.warning("Steam still running after kill; depot keys "
+                                           "and ACF entries may not stick. User should "
+                                           "close Steam and re-download if the game shows Buy.")
                     else:
                         from sff.core.processes import SteamProcess, is_proc_running
                         _sp = SteamProcess(steam_path)
@@ -2028,6 +2035,10 @@ def _bridge_download_game_ddmod(bridge, app_id, source, lua_path, manifest_folde
                             _w = 0
                             while is_proc_running(_sp.exe_name) and _w < 20:
                                 _t3.sleep(0.5); _w += 0.5
+                            if is_proc_running(_sp.exe_name):
+                                logger.warning("Steam still running after kill; depot keys "
+                                               "and ACF entries may not stick. User should "
+                                               "close Steam and re-download if the game shows Buy.")
                 except Exception:
                     pass
 
@@ -2036,6 +2047,7 @@ def _bridge_download_game_ddmod(bridge, app_id, source, lua_path, manifest_folde
                 # set_stats_and_achievements, app_list_man.add_ids,
                 # ACFWriter.write_acf(parsed), ACFWriter.patch_workshop_acf(parsed),
                 # ensure_library_has_app(steam_path, dest, app_id).
+                logger.debug("ddmod %s: registering with Steam (windows)", app_id)
                 try:
                     from sff.steam_tools_compat import install_lua_to_steam
                     install_lua_to_steam(steam_path, app_id, lua_install_file)
@@ -2072,6 +2084,7 @@ def _bridge_download_game_ddmod(bridge, app_id, source, lua_path, manifest_folde
 
             elif sys.platform == "linux" and dest_is_library:
                 # SLSSteam consumes ~/.config/SLSsteam/config.yaml.
+                logger.debug("ddmod %s: registering with Steam (linux)", app_id)
                 try:
                     if hasattr(bridge._ui, 'sls_man') and bridge._ui.sls_man:
                         bridge._ui.sls_man.add_ids(parsed)

@@ -765,8 +765,16 @@ def browse_games_json(offset=0, per_page=20, sort_by="updated", block_nsfw=False
         return item[0]
 
     def _updated_ts(info):
-        # games.json from upstream lost updated_date; last_modified (epoch
-        # seconds, Steam's own change stamp) is the only live signal.
+        # last_modified (epoch seconds, Steam's own change stamp) is the
+        # live signal. Upstream's updated_date column froze on 2026-06-10,
+        # so reading it first pinned every game that has one at "3 months
+        # ago" regardless of real updates. updated_date only as fallback.
+        try:
+            lm = float(info.get("last_modified") or 0)
+        except (TypeError, ValueError):
+            lm = 0.0
+        if lm:
+            return lm
         ud = info.get("updated_date") or ""
         if ud:
             try:
@@ -774,10 +782,7 @@ def browse_games_json(offset=0, per_page=20, sort_by="updated", block_nsfw=False
                 return datetime.fromisoformat(str(ud).replace("Z", "+00:00")).timestamp()
             except ValueError:
                 pass
-        try:
-            return float(info.get("last_modified") or 0)
-        except (TypeError, ValueError):
-            return 0.0
+        return 0.0
 
     def updated_key(item):
         return (_updated_ts(item[2]), item[0])

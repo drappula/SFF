@@ -206,6 +206,25 @@ a:hover { text-decoration: underline; }
     opacity: 0.85;
 }
 
+/* The global * { margin: 0 } reset leaves hints and checkbox rows flush
+   against their neighbours, so spacing lives here instead. The labels are
+   inline by default, which also made any inline margin-top a no-op. */
+.setting-hint {
+    margin: 14px 0;
+}
+
+.setting-hint:first-child {
+    margin-top: 0;
+}
+
+.setting-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+    cursor: pointer;
+}
+
 /* ── Action Cards ───────────────────────────────────── */
 
 .action-grid {
