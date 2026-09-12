@@ -196,7 +196,8 @@ class SFFMainWindow(QMainWindow):
         self._stream_emitter.text_written.connect(self._buffer_qt_log)
         self._worker = None
         self._worker_thread = None
-        self.setWindowTitle("SteaMidra")
+        from sff.core.strings import VERSION
+        self.setWindowTitle(f"SteaMidra Fork ({VERSION})")
         self.setMinimumSize(960, 700)
         geom = get_setting(_S.WINDOW_GEOMETRY)
         if geom:
@@ -1948,7 +1949,7 @@ class SFFMainWindow(QMainWindow):
             self,
             "About SteaMidra",
             f"SteaMidra\nVersion {VERSION}\n\n"
-            "https://github.com/Midrags/SFF/releases",
+            "https://github.com/drappula/SFF/releases",
         )
 
     # ── LumaCore Setup helpers ────────────────────────────────────

@@ -32,7 +32,7 @@ except ImportError as _qt_err:
         "SteaMidra failed to start because PyQt6 is missing from the install.\n\n"
         "This usually means the EXE you downloaded is incomplete (a CI build "
         "shipped without the GUI runtime). Re-download the latest release from:\n\n"
-        "https://github.com/Midrags/SFF/releases/latest\n\n"
+        "https://github.com/drappula/SFF/releases/latest\n\n"
         "If the problem persists after a fresh install, ping the maintainer.\n\n"
         f"Original error: {_qt_err}"
     )

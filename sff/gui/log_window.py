@@ -120,10 +120,16 @@ class GlobalLogWindow(QDialog):
         toolbar.addStretch()
         self._clear_btn = QPushButton("Clear")
         self._clear_btn.setFixedWidth(70)
+        # QDialog would otherwise make this the default button: pressing
+        # Enter while reading the log triggered Clear.
+        self._clear_btn.setAutoDefault(False)
+        self._clear_btn.setDefault(False)
         self._clear_btn.clicked.connect(self._text.clear if hasattr(self, '_text') else lambda: None)
         toolbar.addWidget(self._clear_btn)
         self._copy_btn = QPushButton("Copy All")
         self._copy_btn.setFixedWidth(80)
+        self._copy_btn.setAutoDefault(False)
+        self._copy_btn.setDefault(False)
         self._copy_btn.clicked.connect(self._copy_all)
         toolbar.addWidget(self._copy_btn)
         layout.addLayout(toolbar)

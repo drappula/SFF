@@ -24,7 +24,7 @@ import json
 from sff.network.http_utils import get_request
 from sff.core.strings import VERSION
 
-# Hardcoded to ensure updates always fetch from https://github.com/Midrags/SFF/releases
+# Hardcoded to ensure updates always fetch from https://github.com/drappula/SFF/releases
 
 
 def _parse_version(tag):
@@ -52,8 +52,8 @@ def is_newer_version(remote_tag, current):
 
 class Updater:
 
-    _LATEST_URL = "https://api.github.com/repos/Midrags/SFF/releases/latest"
-    _RELEASES_URL = "https://api.github.com/repos/Midrags/SFF/releases"
+    _LATEST_URL = "https://api.github.com/repos/drappula/SFF/releases/latest"
+    _RELEASES_URL = "https://api.github.com/repos/drappula/SFF/releases"
     _HEADERS = {"Accept": "application/vnd.github.v3+json", "User-Agent": "SteaMidra-Updater"}
 
     @staticmethod
@@ -116,7 +116,7 @@ class Updater:
         # any HTTP/JSON failure must come back as "" so startup keeps moving.
         if not version:
             return ""
-        url = f"https://api.github.com/repos/Midrags/SFF/releases/tags/{version}"
+        url = f"https://api.github.com/repos/drappula/SFF/releases/tags/{version}"
         try:
             resp = asyncio.run(
                 get_request(url, "json", headers=Updater._HEADERS)

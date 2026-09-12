@@ -372,7 +372,7 @@ if __name__ == "__main__":
 
                         description='SteaMidra - set up games for Steam with Lua scripts, manifests, and LumaCore',
 
-                        epilog='https://github.com/Midrags/SFF/releases')
+                        epilog='https://github.com/drappula/SFF/releases')
 
     parser.add_argument(
 
