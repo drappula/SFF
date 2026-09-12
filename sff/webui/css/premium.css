@@ -1284,18 +1284,81 @@ select:focus-visible,
 }
 
 /* ── Loading ─────────────────────────────── */
+/* Mirrors the real card anatomy: 160px header image + two text lines,
+   and full-width rows in list mode. Shimmer animates per block, not
+   the whole card. */
 
 .loading-skeleton {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 20px;
 }
 
 .skeleton-card {
+  pointer-events: none;
+  height: auto;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  animation: none;
+}
+
+.skeleton-img {
+  width: 100%;
+  height: 160px;
+}
+
+.skeleton-card .skeleton-body {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.skeleton-img,
+.skeleton-thumb,
+.skeleton-line {
+  background: linear-gradient(90deg, var(--bg-secondary, #334155) 25%, var(--card-bg, #1e293b) 50%, var(--bg-secondary, #334155) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-loading 2s infinite;
+}
+
+.skeleton-line {
+  height: 12px;
+  border-radius: 6px;
+}
+
+.skeleton-line.short {
+  height: 10px;
+  width: 45%;
+}
+
+.skeleton-row {
+  pointer-events: none;
+  background: transparent;
+  animation: none;
+}
+
+.loading-skeleton:has(.skeleton-row) {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.skeleton-thumb {
+  width: 64px;
+  height: 36px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.skeleton-row .skeleton-body {
   flex: 1;
-  min-width: 180px;
-  height: 60px;
-  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-block: 4px;
 }
 
 /* ── Pagination ─────────────────────────────── */

@@ -12,6 +12,7 @@
 ### Changed
 
 - **Faster Windows installer builds** - the Setup.exe now compresses with zlib instead of solid LZMA. Builds take about seven minutes less; the installer is 150 MB larger. The portable zip is unchanged. CI also caches the Python venv between runs.
+- **Store search is several times faster** - typing a search no longer re-cleans every one of the ~200k game names per query. Results are identical.
 
 ### Removed
 
@@ -24,6 +25,7 @@
 - **Warns when Steam won't close** - download setup logs a warning if the kill leaves Steam running; the locked config writes that follow used to fail silently.
 - **"No cached LumaCore support data" on new Steam builds** - the pattern cache prewarm could fail to find patterns that existed, leaving the banner up. Launching SteaMidra after a Steam update now fills the cache again, and the banner clears right away once it confirms the current build's patterns are all in place.
 - **Recently Updated stuck at old dates** - the Store list now sorts and labels by Steam's last-modified stamp.
+- **Store loading placeholder** - while a page loads, the Store now shows placeholder cards shaped like the real grid (or rows in list view) instead of a strip of thin bars.
 
 ## 6.6.7d
 

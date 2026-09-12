@@ -582,6 +582,32 @@ window.Store = (function() {
         _renderCurrentView();
     }
 
+    function _skeletonGridCard() {
+        var el = document.createElement('div');
+        el.className = 'game-card skeleton-card';
+        el.setAttribute('aria-hidden', 'true');
+        el.innerHTML =
+            '<div class="skeleton-img"></div>' +
+            '<div class="skeleton-body">' +
+            '<div class="skeleton-line" style="width:75%"></div>' +
+            '<div class="skeleton-line short" style="width:40%"></div>' +
+            '</div>';
+        return el;
+    }
+
+    function _skeletonListRow() {
+        var el = document.createElement('div');
+        el.className = 'game-list-item skeleton-row';
+        el.setAttribute('aria-hidden', 'true');
+        el.innerHTML =
+            '<div class="skeleton-thumb"></div>' +
+            '<div class="skeleton-body">' +
+            '<div class="skeleton-line" style="width:50%"></div>' +
+            '<div class="skeleton-line short" style="width:25%"></div>' +
+            '</div>';
+        return el;
+    }
+
     function _showLoading() {
         var loading = document.getElementById('store-loading');
         var grid = document.getElementById('store-grid');
@@ -590,7 +616,17 @@ window.Store = (function() {
         _releaseStoreImages();
         if (grid) grid.innerHTML = '';
         if (list) list.innerHTML = '';
-        if (loading) loading.classList.remove('hidden');
+        if (loading) {
+            loading.innerHTML = '';
+            var fragment = document.createDocumentFragment();
+            if (_viewMode === 'list') {
+                for (var i = 0; i < 10; i++) fragment.appendChild(_skeletonListRow());
+            } else {
+                for (var j = 0; j < 12; j++) fragment.appendChild(_skeletonGridCard());
+            }
+            loading.appendChild(fragment);
+            loading.classList.remove('hidden');
+        }
         if (grid) grid.classList.add('hidden');
         if (list) list.classList.add('hidden');
     }
