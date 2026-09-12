@@ -626,6 +626,7 @@ window.Settings = (function() {
         var numbers = {
             'setting-download-concurrency': 'download_concurrency',
             'setting-depot-download-timeout': 'depot_download_timeout',
+            'setting-download-speed-limit': 'download_speed_limit_mb',
             'setting-parallel-workers': 'parallel_downloads',
             'setting-backup-retention': 'backup_retention',
             'setting-live-log-lines': 'live_log_max_lines',
@@ -870,6 +871,7 @@ window.Settings = (function() {
                 // Number inputs
                 _setInputVal('setting-download-concurrency', settings.download_concurrency || '32');
                 _setInputVal('setting-depot-download-timeout', settings.depot_download_timeout || '0');
+                _setInputVal('setting-download-speed-limit', settings.download_speed_limit_mb || '0');
                 _setInputVal('setting-parallel-workers', settings.parallel_downloads || '5');
                 _setInputVal('setting-queue-concurrency', settings.download_queue_concurrency || '3');
                 _setInputVal('setting-backup-retention', settings.backup_retention || '4');

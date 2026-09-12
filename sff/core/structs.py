@@ -226,6 +226,7 @@ class Settings(Enum):
     PARALLEL_DOWNLOADS = SettingItem("parallel_downloads", "Parallel Download Workers", False, str)
     DOWNLOAD_CONCURRENCY = SettingItem("download_concurrency", "Max concurrent chunk downloads (8-64)", False, str)
     DEPOT_DOWNLOAD_TIMEOUT = SettingItem("depot_download_timeout", "DDMod depot timeout in minutes (0 = no limit)", False, str)
+    DOWNLOAD_SPEED_LIMIT_MB = SettingItem("download_speed_limit_mb", "Download speed limit in MB/s (0 = no limit)", False, str)
     BACKUP_RETENTION = SettingItem("backup_retention", "Backup Retention Count", False, str)
     ENABLE_NOTIFICATIONS = SettingItem("enable_notifications", "Enable Desktop Notifications", False, bool)
     USE_PARALLEL_DOWNLOADS = SettingItem("use_parallel_downloads", "Use Parallel Downloads", False, bool)

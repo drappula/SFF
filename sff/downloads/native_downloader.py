@@ -39,11 +39,77 @@ import logging
 import os
 import re
 import struct
+import threading
 import time
 import zipfile
 import zlib
 from pathlib import Path
 from typing import Callable
+
+
+class _SpeedThrottle:
+    """Shared leaky-bucket pacing over wire bytes across the worker pool.
+
+    rate is bytes/second; 0 disables it (acquire returns instantly). A chunk
+    is bought before its bytes are decrypted/written, so the cap tracks the
+    CDN rate rather than the inflated decompressed size.
+
+    ponytail: pacing is per-chunk (the whole chunk is bought at once), so a
+    burst can overshoot the cap by up to MAX_WORKERS chunk sizes before
+    settling. Chunks are ~1 MB, good enough for a politeness limiter.
+    Upgrade path: stream the GET and acquire incrementally.
+    """
+
+    def __init__(self, rate: int):
+        self.rate = max(0, int(rate))
+        self._tokens = float(self.rate)
+        self._last = time.monotonic()
+        self._lock = threading.Lock()
+
+    def acquire(self, n: int, should_stop=None) -> bool:
+        if self.rate <= 0 or n <= 0:
+            return False
+        with self._lock:
+            now = time.monotonic()
+            self._tokens = min(float(self.rate), self._tokens + (now - self._last) * self.rate)
+            self._last = now
+            self._tokens -= n
+            wait = -self._tokens / self.rate if self._tokens < 0 else 0.0
+        # Sleep off-lock so the other workers advance the bucket in parallel
+        # and each pays only for its own slice of the debt.
+        end = time.monotonic() + wait
+        while wait > 0:
+            if should_stop is not None and should_stop():
+                return True
+            time.sleep(min(wait, 0.05))
+            wait = end - time.monotonic()
+        return False
+
+
+_throttle_lock = threading.Lock()
+_shared_throttle = [None, None]  # [rate, throttle]
+
+
+def _read_speed_limit() -> int:
+    try:
+        from sff.core.storage.settings import get_setting
+        from sff.core.structs import Settings
+        raw = get_setting(Settings.DOWNLOAD_SPEED_LIMIT_MB)
+        mb = float(raw) if raw not in (None, "") else 0.0
+    except Exception:
+        return 0
+    return int(mb * 1024 * 1024) if mb > 0 else 0
+
+
+def _get_throttle() -> _SpeedThrottle:
+    # One bucket for the process: parallel depot downloads share the cap,
+    # and a new setting value takes effect on the next download.
+    rate = _read_speed_limit()
+    with _throttle_lock:
+        if _shared_throttle[1] is None or _shared_throttle[0] != rate:
+            _shared_throttle[0] = rate
+            _shared_throttle[1] = _SpeedThrottle(rate)
+        return _shared_throttle[1]
 
 import httpx
 from Crypto.Cipher import AES
@@ -651,6 +717,11 @@ def download_depot(
     wire_bytes = [0]
     fatal_error = [None]
     _stop = threading.Event()
+    throttle = _get_throttle()
+    if throttle.rate:
+        print_fn(f"[native] Speed limit: {throttle.rate / (1024 * 1024):.1f} MB/s")
+    else:
+        logger.debug("native download: no speed limit configured")
 
     def _abort():
         # Unblock every worker fast: the flag breaks the retry loop and the
@@ -724,6 +795,9 @@ def download_depot(
 
         if chunk_data is None:
             return -1
+
+        if throttle.acquire(len(chunk_data), _cancelled):
+            return -2
 
         try:
             dec = _aes_symmetric_decrypt(chunk_data, key_bytes)
