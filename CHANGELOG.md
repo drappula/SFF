@@ -11,7 +11,7 @@
 
 ### Changed
 
-- **Faster Windows installer builds** - the Setup.exe now compresses with zlib instead of solid LZMA. Builds drop by roughly seven minutes; the installer is around 150 MB larger. The portable zip is unchanged. CI also caches the Python venv between runs.
+- **Faster Windows installer builds** - the Setup.exe now compresses with zlib instead of solid LZMA. Builds take about seven minutes less; the installer is 150 MB larger. The portable zip is unchanged. CI also caches the Python venv between runs.
 
 ### Removed
 
@@ -22,7 +22,7 @@
 - **Windows downloads use LumaCore again** - 6.6.7d switched Windows to the built-in downloader. Windows now registers the game and hands the files to Steam/LumaCore. If registration fails, usually because Steam holds the files locked, the download says so instead of claiming the game is in your library.
 - **Downloads stalling on "Parsing Lua..."** - the check for whether a game is already registered re-scanned the whole Steam plug-in folder and the full game list to answer one yes-or-no question; it now reads that game's file directly.
 - **Warns when Steam won't close** - download setup logs a warning if the kill leaves Steam running; the locked config writes that follow used to fail silently.
-- **"No cached LumaCore support data" on new Steam builds** - the pattern cache prewarm asked MigoReleases for a flat file path that always 404s since the repo moved every module into its own folder, so fresh Steam builds were never cached even when the patterns existed. It now fetches per-module paths; launching SteaMidra after a Steam update fills the cache again.
+- **"No cached LumaCore support data" on new Steam builds** - the pattern cache prewarm could fail to find patterns that existed, leaving the banner up. Launching SteaMidra after a Steam update now fills the cache again.
 - **Recently Updated stuck at old dates** - the Store list now sorts and labels by Steam's last-modified stamp.
 
 ## 6.6.7d
