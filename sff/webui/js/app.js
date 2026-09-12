@@ -255,29 +255,9 @@ window.App = (function() {
                         var addedMsg = (window.I18n && I18n.t) ? I18n.t(addedKey) : addedKey;
                         Components.showToast('success', addedMsg);
                         _populateGameDropdown();
-                        if (result.is_windows && result.app_id) {
-                            Bridge.callWithCallback('get_setting', 'auto_enable_updates_new_games', function(val) {
-                                if (val === 'True') return;
-                                var fastAutoUpdateMsg = 'Game downloaded successfully.\n\nWould you like to enable auto-updates for this game?\n(Keeps the Steam Update button visible for this game.)';
-                                Components.showConfirm('Auto Update', fastAutoUpdateMsg,
-                                    function() { Bridge.call('let_updates_add_game', String(result.app_id)); },
-                                    function() { }
-                                );
-                            });
-                        }
                     }
                     if (result.task === 'download_ddmod' && result.success) {
                         _populateGameDropdown();
-                        if (result.is_windows && result.app_id) {
-                            Bridge.callWithCallback('get_setting', 'auto_enable_updates_new_games', function(val) {
-                                if (val === 'True') return;
-                                var autoUpdateMsg = 'Game downloaded successfully.\n\nWould you like to enable auto-updates for this game?\n(Keeps the Steam Update button visible for this game.)';
-                                Components.showConfirm('Auto Update', autoUpdateMsg,
-                                    function() { Bridge.call('let_updates_add_game', String(result.app_id)); },
-                                    function() { }
-                                );
-                            });
-                        }
                     }
                     if (result.task === 'download_older_auto') {
                         var dgStatus = document.getElementById('downgrade-status');
