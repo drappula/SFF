@@ -46,6 +46,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: 'pip'
       - name: Install NSIS
         uses: negrutiu/nsis-install@v2
       - name: Fetch store metadata seed
@@ -58,7 +59,6 @@ jobs:
           python -m pip install --upgrade pip || exit /b 1
           python -m pip install -r requirements.txt || exit /b 1
           python -m pip install steam==1.4.4 --no-deps || exit /b 1
-          python -m pip install pyinstaller || exit /b 1
           python -c "import PyQt6.QtCore, PyQt6.QtWebEngineCore, prompt_toolkit, selenium, keyring, nacl, cryptography, googleapiclient, zendriver, bs4; print('all imports OK')" || exit /b 1
           call build_installer.bat
           if not exist "dist\SteaMidra_GUI\_internal\PyQt6\Qt6\bin\Qt6Core.dll" (
@@ -72,13 +72,16 @@ jobs:
           $version = (Select-String -Path "sff\core\strings.py" -Pattern '^VERSION = "(.+)"').Matches.Groups[1].Value
           echo "Building Windows portable zip for version: $version"
           Compress-Archive -Force -Path "dist\SteaMidra_GUI" -DestinationPath "SteaMidra-${version}-windows.zip"
-      - name: Upload Windows artifacts
+      - name: Upload Windows portable zip
         uses: actions/upload-artifact@v4
         with:
           name: windows-release
-          path: |
-            SteaMidra-*-windows.zip
-            SteaMidra-*-Setup.exe
+          path: SteaMidra-*-windows.zip
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-setup
+          path: SteaMidra-*-Setup.exe
   release:
     needs: [build-linux, build-windows]
     runs-on: ubuntu-latest
@@ -94,7 +97,7 @@ jobs:
           files: |
             linux-release/SteaMidra-*-linux.zip
             windows-release/SteaMidra-*-windows.zip
-            windows-release/SteaMidra-*-Setup.exe
+            windows-setup/SteaMidra-*-Setup.exe
           draft: false
           prerelease: false
           body_path: release-note.md

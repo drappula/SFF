@@ -9,6 +9,10 @@
 - **Games no longer auto-update by default** - on Windows, SteaMidra now installs the manifest-pin helper at startup, so added games stay on their pinned version instead of Steam updating them. Removing the helper in Auto Update Games is respected across restarts. Steam's config and depotcache folders are also created up front.
 - **Store loads without a spinner** - the Store's first page is fetched in the background at startup and results are kept when you switch tabs, so opening the Store or returning to it shows your last search instead of a loading screen.
 
+### Changed
+
+- **Faster Windows installer builds** - the Setup.exe now compresses with zlib instead of solid LZMA. Builds drop by roughly seven minutes; the installer is around 150 MB larger. The portable zip is unchanged.
+
 ### Fixed
 
 - **Windows downloads use LumaCore again** - 6.6.7d switched Windows to the built-in downloader. Windows now registers the game and hands the files to Steam/LumaCore. If registration fails, usually because Steam holds the files locked, the download says so instead of claiming the game is in your library.

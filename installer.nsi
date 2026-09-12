@@ -15,7 +15,9 @@ OutFile "SteaMidra-${VERSION}-Setup.exe"
 InstallDir "$LOCALAPPDATA\${APPNAME}"
 InstallDirRegKey HKCU "Software\${COMPANY}\${APPNAME}" "InstallDir"
 RequestExecutionLevel user
-SetCompressor /SOLID lzma
+; Solid LZMA on 1.1 GB of dist data cost ~8 min per CI build for ~150 MB
+; saved. zlib compresses in seconds and the portable zip was never smaller.
+SetCompressor /SOLID zlib
 BrandingText "${APPNAME} ${VERSION}"
 
 ; ============================================================
