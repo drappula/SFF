@@ -579,6 +579,8 @@ def _load_steam_applist():
                 _f.write("\n".join(_gs))
         except Exception:
             pass
+        for _a in _result:
+            _a["norm"] = _normalize_for_search(_a.get("name", ""))
         _STEAM_APPLIST_CACHE = _result
         _STEAM_APPLIST_CACHE_TIME = _now
         _result.sort(key=lambda x: x.get('appid', 0))
@@ -594,15 +596,41 @@ def _load_steam_applist():
 
 def _search_steam_catalog(query, offset, per_page, sort_by='updated'):
     """Fallback store search using full Steam public app list when Hubcap is unavailable."""
+    _t0 = _time.perf_counter()
     apps = _load_steam_applist()
     if not apps:
         return {"games": [], "total": 0, "fallback": True}
     if query:
         q_norm = _normalize_for_search(query)
         if q_norm:
+            # Scoring every name costs ~2.6s per query — the per-char
+            # normalization dominates and repeats on the same 200k names.
+            # "norm" is precomputed at list build; the substring prefilter
+            # on it is a superset of everything the scorer can accept
+            # (alias variants, word-start matches, appid-digit hits), so
+            # the full scorer only runs on the few hundred survivors.
+            compact = q_norm.replace(" ", "")
+            is_digit = compact.isdigit()
+            token_sets = [set(_store_words(q_norm))]
+            for alt in _alias_expanded_queries(q_norm):
+                alt_norm = _normalize_for_search(alt)
+                if alt_norm:
+                    token_sets.append(set(_store_words(alt_norm)))
+
+            def _prefilter_ok(a):
+                if is_digit:
+                    aid = str(a.get("appid") or "")
+                    if aid and aid.startswith(compact):
+                        return True
+                nn = a.get("norm")
+                if nn is None:
+                    nn = _normalize_for_search(a.get("name", ""))
+                return any(all(t in nn for t in ts) for ts in token_sets)
+
             apps = [
                 a for a in apps
-                if _store_search_score(q_norm, a.get("name", ""), a.get("appid"))[0] < 99
+                if _prefilter_ok(a)
+                and _store_search_score(q_norm, a.get("name", ""), a.get("appid"))[0] < 99
             ]
     sb = (sort_by or 'updated').lower()
     if sb == 'name_asc':
@@ -640,6 +668,10 @@ def _search_steam_catalog(query, offset, per_page, sort_by='updated'):
         }
         enrich_game_dict(row)
         games.append(row)
+    logger.debug(
+        "_search_steam_catalog %r: %d candidates -> %d games in %.0fms",
+        query, total, len(games), (_time.perf_counter() - _t0) * 1000,
+    )
     return {"games": games, "total": total, "fallback": True}
 
 
