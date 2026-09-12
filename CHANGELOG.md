@@ -22,7 +22,7 @@
 - **Windows downloads use LumaCore again** - 6.6.7d switched Windows to the built-in downloader. Windows now registers the game and hands the files to Steam/LumaCore. If registration fails, usually because Steam holds the files locked, the download says so instead of claiming the game is in your library.
 - **Downloads stalling on "Parsing Lua..."** - the check for whether a game is already registered re-scanned the whole Steam plug-in folder and the full game list to answer one yes-or-no question; it now reads that game's file directly.
 - **Warns when Steam won't close** - download setup logs a warning if the kill leaves Steam running; the locked config writes that follow used to fail silently.
-- **"No cached LumaCore support data" on new Steam builds** - the pattern cache prewarm could fail to find patterns that existed, leaving the banner up. Launching SteaMidra after a Steam update now fills the cache again.
+- **"No cached LumaCore support data" on new Steam builds** - the pattern cache prewarm could fail to find patterns that existed, leaving the banner up. Launching SteaMidra after a Steam update now fills the cache again, and the banner clears right away once it confirms the current build's patterns are all in place.
 - **Recently Updated stuck at old dates** - the Store list now sorts and labels by Steam's last-modified stamp.
 
 ## 6.6.7d

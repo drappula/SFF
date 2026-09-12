@@ -333,14 +333,17 @@ def _prewarm_lumacore_patterns(
         ("steamclient IPC", steam_path / "steamclient64.dll", "steamclientipc", "steamclientipc"),
     )
     cache_root = steam_path / "lumacore" / "pattern"
+    all_ready = True
     for label, binary_path, subdir, remote_dir in jobs:
         if not binary_path.is_file():
             _progress(f"Pattern cache skipped for {label}: Steam DLL not found.", callback)
+            all_ready = False
             continue
         try:
             sha = _sha256_file(binary_path)
         except OSError as exc:
             _progress(f"Pattern cache skipped for {label}: {exc}", callback)
+            all_ready = False
             continue
 
         target_dir = cache_root / subdir if subdir else cache_root
@@ -352,25 +355,30 @@ def _prewarm_lumacore_patterns(
         body = _download_pattern_body(subdir, sha, remote_dir)
         if body is None:
             _progress(f"Pattern cache prewarm missed for {label}.", callback)
+            all_ready = False
             continue
         try:
             _write_pattern_cache(target, body)
             _progress(f"Pattern cache prewarmed for {label}.", callback)
         except OSError as exc:
             _progress(f"Pattern cache write failed for {label}: {exc}", callback)
+            all_ready = False
+    return all_ready
 
 
-def prewarm_pattern_cache_if_missing(steam_path) -> None:
+def prewarm_pattern_cache_if_missing(steam_path) -> bool:
     """Run at app startup — fill missing LumaCore pattern TOMLs for the current
-    Steam client build if LumaCore is installed. No-op otherwise."""
+    Steam client build if LumaCore is installed. No-op otherwise. Returns True
+    when the current build's patterns are all on disk afterwards."""
     try:
         if not steam_path:
-            return
+            return True
         if not (steam_path / "LumaCore.dll").is_file() and not (steam_path / "dwmapi.dll").is_file():
-            return
-        _prewarm_lumacore_patterns(steam_path, None)
+            return True
+        return _prewarm_lumacore_patterns(steam_path, None)
     except Exception as exc:
         logger.debug("Startup LumaCore pattern prewarm skipped: %s", exc)
+        return False
 
 
 def _fetch_release_asset(variant: str = "release") -> Optional[tuple[str, str]]:
