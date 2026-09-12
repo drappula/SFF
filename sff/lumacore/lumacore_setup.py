@@ -334,6 +334,7 @@ def _prewarm_lumacore_patterns(
     )
     cache_root = steam_path / "lumacore" / "pattern"
     all_ready = True
+    wrote = 0
     for label, binary_path, subdir, remote_dir in jobs:
         if not binary_path.is_file():
             _progress(f"Pattern cache skipped for {label}: Steam DLL not found.", callback)
@@ -359,26 +360,27 @@ def _prewarm_lumacore_patterns(
             continue
         try:
             _write_pattern_cache(target, body)
+            wrote += 1
             _progress(f"Pattern cache prewarmed for {label}.", callback)
         except OSError as exc:
             _progress(f"Pattern cache write failed for {label}: {exc}", callback)
             all_ready = False
-    return all_ready
+    return all_ready, wrote
 
 
-def prewarm_pattern_cache_if_missing(steam_path) -> bool:
+def prewarm_pattern_cache_if_missing(steam_path) -> tuple[bool, int]:
     """Run at app startup — fill missing LumaCore pattern TOMLs for the current
-    Steam client build if LumaCore is installed. No-op otherwise. Returns True
-    when the current build's patterns are all on disk afterwards."""
+    Steam client build if LumaCore is installed. No-op otherwise. Returns
+    (all_current_patterns_present, new_pattern_files_written)."""
     try:
         if not steam_path:
-            return True
+            return True, 0
         if not (steam_path / "LumaCore.dll").is_file() and not (steam_path / "dwmapi.dll").is_file():
-            return True
+            return True, 0
         return _prewarm_lumacore_patterns(steam_path, None)
     except Exception as exc:
         logger.debug("Startup LumaCore pattern prewarm skipped: %s", exc)
-        return False
+        return False, 0
 
 
 def _fetch_release_asset(variant: str = "release") -> Optional[tuple[str, str]]:

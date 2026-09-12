@@ -587,8 +587,14 @@ def main():
                 from sff.lumacore.lumacore_setup import prewarm_pattern_cache_if_missing
                 # Patterns complete: the banner's warning is stale, and the
                 # poller only re-emits when status.json changes (Steam rerun).
-                if prewarm_pattern_cache_if_missing(steam_path):
+                # When the prewarm actually filled a gap the banner was
+                # warning about, offer to restart Steam so it loads them.
+                complete, wrote = prewarm_pattern_cache_if_missing(steam_path)
+                banner_was_up = window.lumacore_banner_shown()
+                if complete:
                     window._hide_lumacore_banner()
+                if complete and wrote > 0 and banner_was_up:
+                    window.ask_restart_steam_for_patterns()
             except Exception:
                 pass
         QTimer.singleShot(8000, _prewarm_luma)

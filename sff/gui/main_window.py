@@ -980,6 +980,30 @@ class SFFMainWindow(QMainWindow):
             return
         banner.setVisible(False)
 
+    def lumacore_banner_shown(self) -> bool:
+        banner = getattr(self, "_lumacore_banner", None)
+        return bool(banner is not None and banner.isVisible())
+
+    def ask_restart_steam_for_patterns(self) -> None:
+        """Modal prompt after a startup pattern prewarm filled the cache while
+        the warning banner was up. restart_steam kills Steam, so a game
+        downloading through Steam right now would be interrupted; the dialog
+        text says to pause it rather than silently deferring the offer."""
+        from PyQt6.QtWidgets import QMessageBox
+
+        bridge = getattr(self, "_web_bridge", None)
+        reply = QMessageBox.question(
+            self,
+            "Restart Steam?",
+            "SteaMidra downloaded the LumaCore patterns for the current Steam\n"
+            "build. Restart Steam now to apply them?\n\n"
+            "Any game downloading through Steam should be paused first.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if reply == QMessageBox.StandardButton.Yes and bridge is not None:
+            bridge.restart_steam()
+
     # ── Worker management ────────────────────────────────────────
 
     def _start_worker(self, func, label: str = "action", on_done=None):
