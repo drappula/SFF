@@ -43,10 +43,20 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Set up Python 3.12
+        id: python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           cache: 'pip'
+      # pyvenv.cfg hardcodes the interpreter path, so a runner image that bumps
+      # the 3.12 patch version must miss this cache — hence python-version in
+      # the key. A wrong-version venv would fail at the import check.
+      - name: Cache venv
+        id: venv-cache
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ steps.python.outputs.python-version }}-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
       - name: Install NSIS
         uses: negrutiu/nsis-install@v2
       - name: Fetch store metadata seed
@@ -54,11 +64,16 @@ jobs:
       - name: Run full build_installer.bat
         shell: cmd
         run: |
-          python -m venv .venv
+          if "${{ steps.venv-cache.outputs.cache-hit }}"=="true" (
+            echo Reusing cached venv
+          ) else (
+            python -m venv .venv || exit /b 1
+            call .venv\Scripts\activate.bat
+            python -m pip install --upgrade pip || exit /b 1
+            python -m pip install -r requirements.txt || exit /b 1
+            python -m pip install steam==1.4.4 --no-deps || exit /b 1
+          )
           call .venv\Scripts\activate.bat
-          python -m pip install --upgrade pip || exit /b 1
-          python -m pip install -r requirements.txt || exit /b 1
-          python -m pip install steam==1.4.4 --no-deps || exit /b 1
           python -c "import PyQt6.QtCore, PyQt6.QtWebEngineCore, prompt_toolkit, selenium, keyring, nacl, cryptography, googleapiclient, zendriver, bs4; print('all imports OK')" || exit /b 1
           call build_installer.bat
           if not exist "dist\SteaMidra_GUI\_internal\PyQt6\Qt6\bin\Qt6Core.dll" (
