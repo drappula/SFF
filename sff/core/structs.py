@@ -188,7 +188,7 @@ class Settings(Enum):
     HUBCAP_DISABLED = SettingItem("hubcap_disabled", "Hubcap Store Disabled", False, bool)
     HUBCAP_KEY_DEAD = SettingItem("hubcap_key_dead", "Hubcap Key Rejected", False, bool)
     RYUU_KEY = SettingItem("ryuu_key", "Ryuu Reseller Key", True, str)
-    RYUU_API_KEY = SettingItem("ryuu_api_key", "Ryuu API Key (premium)", True, str)
+    RYUU_API_KEY = SettingItem("ryuu_api_key", "Ryuu API Key", True, str)
     RYUU_KEY_DEAD = SettingItem("ryuu_key_dead", "Ryuu Key Rejected", False, bool)
     DEPOTBOX_KEY = SettingItem("depotbox_key", "DepotBox API Key", True, str)
     DEPOTBOX_RATE_LIMIT = SettingItem("depotbox_rate_limit", "DepotBox Rate Limit (requests per minute)", False, str)

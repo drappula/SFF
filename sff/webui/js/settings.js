@@ -977,7 +977,10 @@ window.Settings = (function() {
                 savedBadge = document.createElement('span');
                 savedBadge.id = id + '-saved';
                 savedBadge.textContent = '✓ Saved';
-                savedBadge.style.cssText = 'position:absolute;right:8px;top:50%;transform:translateY(-50%);color:#4caf50;font-size:11px;font-weight:600;pointer-events:none;';
+                // Anchor over the input only; the flex row also holds the
+                // Save/Test buttons, and right:8px used to land on them.
+                var r = el.parentElement.clientWidth - (el.offsetLeft + el.offsetWidth);
+                savedBadge.style.cssText = 'position:absolute;right:' + r + 'px;top:50%;transform:translateY(-50%);color:#4caf50;font-size:11px;font-weight:600;pointer-events:none;';
                 el.parentElement.appendChild(savedBadge);
             }
         } else if (val) {

@@ -507,7 +507,7 @@ def _pick_crack_fix(entry):
 # Where to regenerate each provider key.
 _PROVIDER_KEY_SITES = {
     "Hubcap": "https://hubcapmanifest.com/",
-    "Ryuu": "https://generator.ryuu.lol",
+    "Ryuu": "https://generator.ryuu.lol/api",
     "DepotBox": "https://depotbox.org",
 }
 
@@ -1058,14 +1058,19 @@ class WebBridge(QObject):
             from PyQt6.QtCore import QUrl
             parent = self.parent()
             for name in names:
-                label = "Ryuu reseller or premium API key" if name == "Ryuu" else f"{name} API key"
+                label = "Ryuu API Key" if name == "Ryuu" else f"{name} API key"
+                hint = (
+                    "Log in on the Ryuu site first: the key is shown as "
+                    "\"auth_key\" only after signing in. "
+                    if name == "Ryuu" else ""
+                )
                 dlg = QMessageBox(parent.window() if parent is not None else None)
                 dlg.setWindowTitle(f"{name} API key invalid")
                 dlg.setIcon(QMessageBox.Icon.Warning)
                 dlg.setText(
                     f"Your saved {label} was rejected and no longer "
                     "works. Downloads using it will fall back to free "
-                    "sources until you fix it. Paste a new key in "
+                    f"sources until you fix it. {hint}Paste a new key in "
                     "Settings."
                 )
                 btn_site = dlg.addButton(
