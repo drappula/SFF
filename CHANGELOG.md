@@ -4,8 +4,8 @@
 
 ### New
 
-- **Ryuu leads Free Providers** - Ryuu's download endpoint needs no API key and ships the game's lua plus real .manifest files, so it now runs first in the Free Providers chain. Keyless users get manifests seeded into depotcache too.
 - **Dead provider keys** - Hubcap, Ryuu and DepotBox keys are checked a few seconds after launch and whenever a download uses them. A rejected key shows a dialog offering the provider's site, and that provider stops auto-selecting in download pickers and falls back to Free Providers until a working key is saved.
+- **Offer to restart Steam after pattern prewarm** - when startup fills the LumaCore pattern cache for a new Steam build while the warning banner was showing, SteaMidra now asks whether to restart Steam right away so it loads the patterns.
 - **Games no longer auto-update by default** - on Windows, SteaMidra now installs the manifest-pin helper at startup, so added games stay on their pinned version instead of Steam updating them. Removing the helper in Auto Update Games is respected across restarts. Steam's config and depotcache folders are also created up front.
 - **Store loads without a spinner** - the Store's first page is fetched in the background at startup and results are kept when you switch tabs, so opening the Store or returning to it shows your last search instead of a loading screen.
 
@@ -13,6 +13,9 @@
 
 - **Faster Windows installer builds** - the Setup.exe now compresses with zlib instead of solid LZMA. Builds take about seven minutes less; the installer is 150 MB larger. The portable zip is unchanged. CI also caches the Python venv between runs.
 - **Store search is several times faster** - typing a search no longer re-cleans every one of the ~200k game names per query. Results are identical.
+- **Manifest sources prefer free mirrors** - the public GMRC mirrors (steam.run, wudrm, opensteamtool) are gone; they now answer 403/404 everywhere. Manifest fetches try the GitHub manifest mirrors before ManifestHub, so the API-key prompt no longer interrupts a download that a free source can finish.
+- **Download speed limit** - Settings has a "Download Speed Limit (MB/s, 0 = no limit)" box that caps the built-in downloader's wire rate across all chunks and parallel depot downloads. Does not apply to Steam/LumaCore downloads or DepotDownloaderMod.
+- **Ryuu key hints** - Ryuu links now open generator.ryuu.lol/api, and the key dialog and Settings tooltip say to log in first: the key shows up as "auth_key" only after signing in.
 
 ### Removed
 
@@ -24,9 +27,12 @@
 - **Downloads stalling on "Parsing Lua..."** - the check for whether a game is already registered re-scanned the whole Steam plug-in folder and the full game list to answer one yes-or-no question; it now reads that game's file directly.
 - **Warns when Steam won't close** - download setup logs a warning if the kill leaves Steam running; the locked config writes that follow used to fail silently.
 - **"No cached LumaCore support data" on new Steam builds** - the pattern cache prewarm could fail to find patterns that existed, leaving the banner up. Launching SteaMidra after a Steam update now fills the cache again, and the banner clears right away once it confirms the current build's patterns are all in place.
+- **Ryuu downloads for games without a public branch** - the premium API route always asked for branch "public", which Ryuu answers 404 for on most games. It now requests the branch only when one is picked; downloads work out of the box.
 - **Recently Updated stuck at old dates** - the Store list now sorts and labels by Steam's last-modified stamp.
 - **Store loading placeholder** - while a page loads, the Store now shows placeholder cards shaped like the real grid (or rows in list view) instead of a strip of thin bars.
 - **Startup tray message fixed** - the balloon SteaMidra shows when it starts no longer says the app is running in the system tray while its window is clearly open. It now reads "Icon added to the system tray. Right-click it for the menu."
+- **Enter no longer clears the log window** - pressing Enter in the log viewer did nothing useful because the Clear button swallowed it as the dialog default; it is gone.
+- **Saved badge no longer covers buttons** - the "✓ Saved" marker on stored API keys sat on top of the neighboring Save/Test buttons instead of the input field.
 
 ## 6.6.7d
 
