@@ -146,10 +146,12 @@ class TrayIcon(QObject):
         # 11 hides new tray icons in the overflow menu by default; the
         # balloon cuts down on "tray icon missing" reports because users
         # see SteaMidra is alive there even when the icon is overflowed.
+        # Wording matters: this runs at startup while the window is
+        # visible, so it must not claim the app is hidden in the tray.
         try:
             self._tray.showMessage(
                 "SteaMidra",
-                "Running in the system tray. Right-click for the menu.",
+                "Icon added to the system tray. Right-click it for the menu.",
                 QSystemTrayIcon.MessageIcon.Information,
                 2500,
             )

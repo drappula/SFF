@@ -26,6 +26,7 @@
 - **"No cached LumaCore support data" on new Steam builds** - the pattern cache prewarm could fail to find patterns that existed, leaving the banner up. Launching SteaMidra after a Steam update now fills the cache again, and the banner clears right away once it confirms the current build's patterns are all in place.
 - **Recently Updated stuck at old dates** - the Store list now sorts and labels by Steam's last-modified stamp.
 - **Store loading placeholder** - while a page loads, the Store now shows placeholder cards shaped like the real grid (or rows in list view) instead of a strip of thin bars.
+- **Startup tray message fixed** - the balloon SteaMidra shows when it starts no longer says the app is running in the system tray while its window is clearly open. It now reads "Icon added to the system tray. Right-click it for the menu."
 
 ## 6.6.7d
 
