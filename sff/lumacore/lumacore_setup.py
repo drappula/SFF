@@ -295,9 +295,12 @@ def _looks_like_pattern_toml(body: str, subdir: str) -> bool:
     return "rva" in body and "sig" in body
 
 
-def _download_pattern_body(subdir: str, sha: str) -> Optional[str]:
-    rel = f"{subdir}/{sha}.toml" if subdir else f"{sha}.toml"
-    url = f"{_PATTERN_REPO_RAW}/{rel}"
+def _download_pattern_body(subdir: str, sha: str, remote_dir: str) -> Optional[str]:
+    # MigoReleases' pattern branch keeps every module in its own folder;
+    # a flat pattern/<sha>.toml is always a 404 now.
+    if not remote_dir:
+        return None
+    url = f"{_PATTERN_REPO_RAW}/{remote_dir}/{sha}.toml"
     headers = {"Cache-Control": "no-cache", "Accept": "text/plain,*/*"}
     try:
         resp = httpx.get(url, headers=headers, timeout=10, follow_redirects=True)
@@ -322,13 +325,15 @@ def _prewarm_lumacore_patterns(
     callback: Optional[Callable[[str], None]],
 ) -> None:
     """Best-effort cache fill for offline Steam launches after install."""
+    # (label, binary, local subdir, remote folder). LumaCore caches steamclient
+    # and steamui flat in pattern/ but the pattern branch stores them per-module.
     jobs = (
-        ("steamclient", steam_path / "steamclient64.dll", ""),
-        ("steamui", steam_path / "steamui.dll", ""),
-        ("steamclient IPC", steam_path / "steamclient64.dll", "steamclientipc"),
+        ("steamclient", steam_path / "steamclient64.dll", "", "steamclient"),
+        ("steamui", steam_path / "steamui.dll", "", "steamui"),
+        ("steamclient IPC", steam_path / "steamclient64.dll", "steamclientipc", "steamclientipc"),
     )
     cache_root = steam_path / "lumacore" / "pattern"
-    for label, binary_path, subdir in jobs:
+    for label, binary_path, subdir, remote_dir in jobs:
         if not binary_path.is_file():
             _progress(f"Pattern cache skipped for {label}: Steam DLL not found.", callback)
             continue
@@ -344,7 +349,7 @@ def _prewarm_lumacore_patterns(
             _progress(f"Pattern cache ready for {label}.", callback)
             continue
 
-        body = _download_pattern_body(subdir, sha)
+        body = _download_pattern_body(subdir, sha, remote_dir)
         if body is None:
             _progress(f"Pattern cache prewarm missed for {label}.", callback)
             continue
