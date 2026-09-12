@@ -16,7 +16,6 @@
 # You should have received a copy of the GNU General Public License
 # along with SteaMidra.  If not, see <https://www.gnu.org/licenses/>.
 
-import asyncio
 import logging
 import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -29,12 +28,6 @@ from colorama import Fore, Style
 from steam.client.cdn import CDNClient, ContentServer  # type: ignore
 from tqdm import tqdm  # type: ignore
 
-from sff.network.http_utils import (
-    MANIFEST_REQUEST_CODE_HEADERS,
-    get_gmrc,
-    get_request_raw,
-    parse_manifest_request_code,
-)
 from sff.manifest.manifesthub_key import get_manifesthub_api_key
 from sff.manifest.crypto import decrypt_and_save_manifest, has_manifest_magic
 from sff.manifest.id_resolver import (
@@ -46,7 +39,7 @@ from sff.manifest.id_resolver import (
     SharedDepotManifestStrategy,
     StandardManifestStrategy,
 )
-from sff.ui.prompts import prompt_confirm, prompt_select, prompt_text
+from sff.ui.prompts import prompt_select
 from sff.network.steam_client import SteamInfoProvider, get_product_info
 from sff.core.storage.settings import get_setting
 from sff.core.utils import manifests_staging_dir, enter_path
@@ -432,51 +425,6 @@ class ManifestDownloader:
                 logger.debug(f"GitHub mirror ({label}) fetch failed for depot {depot_id}: {e}")
         return None
 
-    def _try_mirror_endpoints(self, depot_id, manifest_id):
-        """Hit the 3 GMRC mirrors to get a request code, then download
-        from Steam's fixed CDN (steampipe.akamaized.net). HTTPS first,
-        HTTP last. No Steam CDN client needed, the code works directly.
-        """
-        _MIRROR_URLS = (
-            (f"https://manifest.opensteamtool.com/{manifest_id}", "manifest.opensteamtool.com"),
-            (f"https://manifest.steam.run/api/manifest/{manifest_id}", "steam.run"),
-            (f"http://gmrc.wudrm.com/manifest/{manifest_id}", "wudrm"),
-        )
-        for url, label in _MIRROR_URLS:
-            try:
-                resp = httpx.get(
-                    url,
-                    headers=MANIFEST_REQUEST_CODE_HEADERS,
-                    timeout=12,
-                    follow_redirects=True,
-                )
-                if resp.status_code == 200:
-                    req_code = parse_manifest_request_code(resp.text)
-                else:
-                    req_code = None
-                if req_code is not None:
-                    logger.debug(f"Mirror {label} returned request code for manifest {manifest_id}")
-                    cdn_url = f"http://steampipe.akamaized.net/depot/{depot_id}/manifest/{manifest_id}/5/{req_code}"
-                    result = get_request_raw(cdn_url)
-                    if result is None:
-                        cdn_url_https = f"https://steampipe.akamaized.net/depot/{depot_id}/manifest/{manifest_id}/5/{req_code}"
-                        result = get_request_raw(cdn_url_https)
-                    if result is not None:
-                        logger.debug(f"Mirror {label} download succeeded for depot {depot_id}")
-                        return result
-                    logger.debug(
-                        f"Mirror {label} gave a request code but the CDN download "
-                        f"failed for depot {depot_id}"
-                    )
-                else:
-                    logger.debug(
-                        f"Mirror {label} had no usable request code "
-                        f"(HTTP {getattr(resp, 'status_code', 'unknown')})"
-                    )
-            except Exception as e:
-                logger.debug(f"Mirror {label} request failed: {e}")
-        return None
-
     def _try_manifesthub(self, depot_id, manifest_id):
         # Hits the ManifestHub API; key is auto-fetched and renewed as needed.
         api_key = get_manifesthub_api_key()
@@ -518,68 +466,43 @@ class ManifestDownloader:
         app_id = "",
     ):
         if self.use_hubcap:
-            # Hubcap path: Hubcap → ManifestHub API → CDN (interactive)
+            # Hubcap path: Hubcap → GitHub mirrors → ManifestHub API.
+            # Free sources before the one that can open a key dialog.
             hubcap_result = self._try_hubcap_generate(depot_id, manifest_id)
             if hubcap_result is not None:
                 return hubcap_result
+            try:
+                gh_result = self._try_github_manifest_bytes(app_id, depot_id, manifest_id)
+                if gh_result is not None:
+                    return gh_result
+            except Exception as e:
+                logger.debug("hubcap-path github fallback failed: %s", e)
             mh_result = self._try_manifesthub(depot_id, manifest_id)
             if mh_result is not None:
                 return mh_result
-            # CDN is dead, skip resolve_gmrc + CDN download.
-            # ManifestHub already tried above, fall through to GitHub.
+            # CDN is dead on this path: no resolve_gmrc + CDN download here.
             logger.debug(f"Hubcap path for depot {depot_id}: all sources failed")
             return None
         # oureveryday path ─────────────────────────────────────────────────────
-        # Step 1: ManifestHub API - the default for MidraEveryDay. Auto-prompts
-        #          for a key (opens the generator page) if none is cached or it
-        #          expired; blank answer falls through to the free mirrors.
-        # Step 2: Try the 3 GMRC mirrors for a request code, pull the manifest
-        #          from steampipe CDN with it. HTTPS before HTTP.
-        # Step 3: Fall back to the 3 GitHub raw mirror repos.
-        # Step 4: Encrypted GMRC endpoint + CDN (last resort).
-        mh_result = self._try_manifesthub(depot_id, manifest_id)
-        if mh_result is not None:
-            return mh_result
-        # Step 2: Hit the 3 mirror endpoints
-        #          to get a request code and download from steampipe CDN.
-        mirror_result = self._try_mirror_endpoints(depot_id, manifest_id)
-        if mirror_result is not None:
-            return mirror_result
-        # Step 3: Try all 3 GitHub raw manifest mirrors in sequence.
-        #          Each hosts the same k25FCdfEOoEJ42S6 manifest set.
+        # Step 1: The 3 GitHub raw mirror repos. Keyless and prompt-free, so
+        #          they run before anything that can open a dialog. Each
+        #          hosts the same k25FCdfEOoEJ42S6 manifest set.
+        # Step 2: ManifestHub API. Auto-prompts for a key (opens the
+        #          generator page) if none is cached or it expired; blank
+        #          answer falls through.
+        # (The old "GMRC endpoint" last resort served the same request-code
+        # mirrors retired below and 403s/404s everywhere; the Steam session's
+        # own request-code path in native_downloader covers live GIDs.)
         try:
             gh_result = self._try_github_manifest_bytes(app_id, depot_id, manifest_id)
             if gh_result is not None:
                 return gh_result
         except Exception as e:
             logger.debug("oureveryday github fallback failed: %s", e)
-        # Step 4: Last resort — encrypted GMRC endpoint for a request
-        #          code, then download from steampipe CDN.
-        req_code = asyncio.run(get_gmrc(manifest_id, silent=True))
-        if req_code is not None:
-            pipe_url = f"http://steampipe.akamaized.net/depot/{depot_id}/manifest/{manifest_id}/5/{req_code}"
-            result = get_request_raw(pipe_url)
-            if result is not None:
-                return result
+        mh_result = self._try_manifesthub(depot_id, manifest_id)
+        if mh_result is not None:
+            return mh_result
         return None
-
-    def resolve_gmrc(self, manifest_id):
-        while True:
-            req_code = asyncio.run(get_gmrc(manifest_id))
-            if req_code is not None:
-                print(f"Request code is: {req_code}")
-                break
-            if prompt_confirm(
-                "Request code endpoint died. Would you like to try again?",
-                false_msg="No (Manually input request code)",
-            ):
-                continue
-            req_code = prompt_text(
-                "Paste the Manifest Request Code here:",
-                validator=lambda x: x.isdigit(),
-            )
-            break
-        return req_code
 
     def download_workshop_item(self, app_id, ugc_id):
         manifest = self.download_single_manifest(app_id, ugc_id)

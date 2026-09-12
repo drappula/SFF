@@ -17,35 +17,20 @@
 # along with SteaMidra.  If not, see <https://www.gnu.org/licenses/>.
 
 import asyncio
-import json
 import logging
 import os
-import sys
 from contextlib import contextmanager
 from tempfile import TemporaryFile
 from pathlib import Path
-from urllib.parse import urlparse
 
 import httpx
 from tqdm import tqdm  # type: ignore
 
-from sff.ui.prompts import prompt_confirm, prompt_text
-from sff.core.secret_store import b64_decrypt
-from typing import Literal, Union, overload
-
-if sys.platform == "win32":
-    import msvcrt
-else:
-    class msvcrt:
-        kbhit = staticmethod(lambda: False)
-        getch = staticmethod(lambda: None)
+from sff.ui.prompts import prompt_text
+from typing import Literal, overload
 
 
 logger = logging.getLogger(__name__)
-
-MANIFEST_REQUEST_CODE_HEADERS = {
-    "User-Agent": "OpenSteamTool/1.0",
-}
 
 
 # httpx supports http/https + socks5 (with httpx-socks). socks4 is NOT
@@ -158,180 +143,6 @@ async def get_request(
 
     except httpx.RequestError as e:
         logger.debug(f"Request error: {repr(e)}")
-
-
-def get_request_raw(url):
-    while True:
-        try:
-            resp = httpx.get(url, timeout=120)
-            # CDN error pages (Akamai "Error" HTML) arrive with a non-200
-            # status; saving them as manifest data poisons depotcache.
-            if resp.status_code != 200:
-                return None
-            return resp.content
-        except httpx.HTTPError as e:
-            print(f"Network error: {repr(e)}")
-            if not prompt_confirm("Try again?"):
-                return None
-
-
-async def _wait_for_enter():
-    print("If it takes too long, press Enter to cancel the request and input manually...")
-    hit = msvcrt.kbhit
-    read = msvcrt.getch
-    while True:
-        ready = hit() and read() == b"\r"
-        if ready:
-            return
-        await asyncio.sleep(0.05)
-
-
-def get_base_domain(url):
-    p = urlparse(url)
-    domain = p.netloc
-    scheme = p.scheme
-    return scheme + "://" + domain
-
-
-def parse_manifest_request_code(body) -> str | None:
-    if body is None:
-        return None
-    if isinstance(body, bytes):
-        text = body.decode("utf-8", errors="ignore").strip()
-    else:
-        text = str(body).strip()
-    if text and len(text) <= 64 and text.isdigit():
-        return text
-    if not text or len(text) > 4096:
-        return None
-    try:
-        data = json.loads(text)
-    except Exception:
-        return None
-    if not isinstance(data, dict):
-        return None
-    content = data.get("content")
-    if content is None:
-        return None
-    code = str(content).strip()
-    if code and len(code) <= 64 and code.isdigit():
-        return code
-    return None
-
-
-def _request_code_body(body) -> bool:
-    return parse_manifest_request_code(body) is not None
-
-
-# Lowkey don't remember why i wrote it like this.
-# It uses a default timeout of 10s but i think it still got stuck?
-async def get_gmrc(manifest_id: Union[str, int], silent: bool = False):
-    # Yes, I'm aware it's not actually "encrypted" since I included the password
-    # Shut up. The point is keeping the host out of the live log + plaintext
-    # source so it doesn't get scraped by every random analyzer that runs
-    # against SteaMidra. The two HTTPS fallbacks below cover the gmrc
-    # downtime window users have been hitting and are also kept encrypted.
-    template_url = b64_decrypt(
-        b'tkRhMNucVUvrymrfjAL8I0riINm/U76wgUJnmsjiaUs=',
-        b'4R66BAMzqmlqisU/9Wwi5bSG2D/zWVuron4mRuw5gCFi+jPxwvqgHOvThx5BpLJAK23I5KABAm7tXlweO3lkEQk5OXrJUjH8zNnyKNv+tYDQE9/8teSpvA==',
-    )
-    url = template_url.format(manifest_id=manifest_id)
-
-    # HTTPS-first fallback templates. Same wire shape (depot-key
-    # request code, plain numeric body), but TLS-encrypted.
-    _MIRROR_KEY = b'tkRhMNucVUvrymrfjAL8I0riINm/U76wgUJnmsjiaUs='
-    _MIRROR_CTS = [
-        b'0Iz+VYuhGtWcKNnwgz026jSlg+p0ai0b1KY6L0CwJjmoe21VRiepEcazuLa24PBss94RPXUyHxyctWq/Jr7geYIG3w9slfT0Xr9l7qosHZs6haacF3uzEgllSgVz',
-        b'c2M+yi0x92v30LgEcOPF6L2xtohj1jzyQM22KTVMz+G6l9ibkeD5PY+AbMJCxj6DM+fJ5ZmFSPxTgOQfx8lMHv3VMrOjL+mmpMIJm+te1o4sKPYg',
-    ]
-    fallback_urls = []
-    for ct in _MIRROR_CTS:
-        try:
-            tpl = b64_decrypt(_MIRROR_KEY, ct)
-            fallback_urls.append(tpl.format(manifest_id=manifest_id))
-        except Exception:
-            continue
-
-    print("Getting request code...")
-
-    headers = {
-        "Referer": get_base_domain(url),
-        **MANIFEST_REQUEST_CODE_HEADERS,
-    }
-
-    # Sanity check on returned bodies. Real responses are an all-digit
-    # decimal request code, usually 16-22 chars. Anything else (HTML
-    # error page, ad redirect, MITM payload injection) gets rejected
-    # before being handed back to the caller. The http gmrc endpoint
-    # is the obvious risk since it's not TLS, but applying the same
-    # guard to the https fallbacks is free and catches captive-portal
-    # injection too.
-    result = None
-
-    # --- Primary endpoint ---
-    # The encrypted URL is hidden on purpose, no logging it in plain text
-    # via the debug log, hence redact_url=True. Already handles "the link
-    # leaked into live log" case.
-    if sys.platform != "win32":
-        result = await get_request(url, headers=headers, redact_url=True)
-    else:
-        request_task = asyncio.create_task(get_request(url, headers=headers, redact_url=True))
-        cancel_task = asyncio.create_task(_wait_for_enter())
-        done, pending = await asyncio.wait(
-            {request_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED
-        )
-        if request_task in done:
-            result = request_task.result()
-        if cancel_task in done:
-            if not request_task.done():
-                print("Cancelling request...", end="")
-                request_task.cancel()
-        for t in pending:
-            t.cancel()
-        try:
-            if result is None:
-                result = await request_task
-        except asyncio.CancelledError:
-            print("✅")
-
-    parsed_result = parse_manifest_request_code(result)
-    if parsed_result is not None:
-        return parsed_result
-    if result is not None:
-        # gmrc returned something but it's not a valid request code.
-        # Treat as failure and let the https fallbacks try.
-        logger.debug("gmrc returned non-numeric body, trying https fallbacks")
-
-    # --- HTTPS fallbacks ---
-    # Two TLS-encrypted mirrors that serve the same depot-key request code
-    # for a given manifest GID. Tried in strict order, one at a time, each
-    # with its own connect+read budget so a slow host can't hold the whole
-    # cascade. fast-fail to the next on any failure.
-    _PER_HOST = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=5.0)
-    for fb_url in fallback_urls:
-        fb_headers = {"Referer": get_base_domain(fb_url), **MANIFEST_REQUEST_CODE_HEADERS}
-        try:
-            fb_result = await get_request(
-                fb_url, headers=fb_headers, redact_url=True, timeout=_PER_HOST,
-            )
-        except Exception:
-            fb_result = None
-        parsed_fb_result = parse_manifest_request_code(fb_result)
-        if parsed_fb_result is not None:
-            print("✓ Got request code from HTTPS fallback")
-            return parsed_fb_result
-
-    if silent:
-        return None
-
-    # --- Fallback: cached manifests / manual ---
-    print("\nAlternative sources for pre-fetched manifests:")
-    print("  • ManifestHub API key → set in SFF Settings → downloads manifests automatically")
-    print("  • ManifestHub site:   https://manifesthub2.filegear-sg.me")
-    print("  • ManifestAutoUpdate: search GitHub for 'ManifestAutoUpdate'")
-    print("  • Drop your own .manifest + depot key file if you have them.")
-    code = prompt_text("Paste the manifest request code (leave blank to skip): ").strip()
-    return code or None
 
 
 def get_game_name(app_id):

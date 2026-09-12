@@ -129,11 +129,6 @@ END_MAGIC = 0x32C415AB
 _CDN_TIMEOUT = 60.0
 _CHUNK_RETRIES = 3
 
-_REQUEST_CODE_FALLBACKS = (
-    ("https://manifest.steam.run/api/manifest/{}", "json", "content"),
-    ("http://gmrc.wudrm.com/manifest/{}", "text", None),
-)
-
 # ---------------------------------------------------------------------------
 # AES-256 symmetric decrypt (Valve depot encryption)
 #   — first 16 bytes = AES-256-ECB(IV)
@@ -302,27 +297,6 @@ def _decompress_chunk(data: bytes) -> bytes:
 # CDN helpers
 # ---------------------------------------------------------------------------
 
-def _fetch_manifest_code_external(manifest_gid: int) -> int | None:
-    for tmpl, mode, field in _REQUEST_CODE_FALLBACKS:
-        url = tmpl.format(manifest_gid)
-        try:
-            resp = httpx.get(url, timeout=10, follow_redirects=True)
-            if resp.status_code != 200:
-                continue
-            body = resp.text.strip()
-            if mode == "json":
-                import json
-                data = json.loads(body)
-                val = str(data.get(field or "", "")).strip()
-                if val.isdigit():
-                    return int(val)
-            elif mode == "text" and body.isdigit():
-                return int(body)
-        except Exception:
-            continue
-    return None
-
-
 def _resolve_request_code(
     cdn_client,
     app_id: int, depot_id: int, manifest_id: int,
@@ -336,11 +310,10 @@ def _resolve_request_code(
             return code
     except Exception:
         pass
-    print_fn("[native] Steam refused request code, trying external providers...")
-    code = _fetch_manifest_code_external(manifest_id)
-    if code:
-        print_fn("[native] Got request code from external provider")
-        return code
+    # No external request-code mirrors anymore: they (steam.run / wudrm /
+    # opensteamtool) were retired. A manifest the Steam session can't code
+    # for arrives as raw bytes instead — Free Providers seeds depotcache
+    # from the GitHub manifest mirrors before native ever runs.
     raise RuntimeError(f"No manifest request code for depot {depot_id}")
 
 

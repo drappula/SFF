@@ -480,12 +480,10 @@ def _seed_free_manifest(depot_id, gid, app_id, depotcache):
 
 def get_freelua(dest, app_id, depotcache=None):
     """Keyless Lua from the free community providers, in priority order:
-    Ryuu's generator (its download endpoint answers without a key and
-    ships the lua plus real .manifest files), trionine ManifestHub (built
-    client-side from depotkeys.json + steamcmd gids, like the site
-    itself), revobd pre-built bundle, then the ManifestHub / ManifestHub3
-    per-app git branches. Any bundled manifests are seeded into
-    depotcache along the way."""
+    trionine ManifestHub (built client-side from depotkeys.json + steamcmd
+    gids, like the site itself), revobd pre-built bundle, then the
+    ManifestHub / ManifestHub3 per-app git branches. Any bundled manifests
+    are seeded into depotcache along the way."""
     if not app_id or not str(app_id).strip().isdigit():
         print(Fore.RED + f"Invalid App ID: '{app_id}'" + Style.RESET_ALL)
         return None
@@ -495,29 +493,7 @@ def get_freelua(dest, app_id, depotcache=None):
         print(Fore.GREEN + f"[Cached] Using existing Lua for {app_id}" + Style.RESET_ALL)
         return lua_path
 
-    # 1) Ryuu, keyless: the /api/download endpoint serves the same zip the
-    # premium route uses and ignores the auth key (verified: no key and a
-    # bogus key return byte-identical bundles). Unknown appids answer 404
-    # JSON fast, so a miss costs one round trip.
-    try:
-        resp = httpx.get(
-            f"https://generator.ryuu.lol/api/download/{app_id}",
-            timeout=60, follow_redirects=True,
-        )
-        if resp.status_code == 200 and resp.content:
-            text = read_lua_from_zip(io.BytesIO(resp.content), decode=True, depotcache=depotcache)
-            if text:
-                lua_path.write_text(text, encoding="utf-8")
-                _update_fallback_depotkeys(text.encode("utf-8", errors="ignore"))
-                print(Fore.GREEN + f"[OK] Free Providers: Ryuu bundle for {app_id} (manifests included)" + Style.RESET_ALL)
-                return lua_path
-            logger.debug("freelua: ryuu HTTP 200 but no .lua in bundle for %s", app_id)
-        elif resp.status_code != 404:
-            logger.debug("freelua: ryuu bundle HTTP %s for %s", resp.status_code, app_id)
-    except Exception as e:
-        print(Fore.YELLOW + f"Ryuu bundle unreachable ({e})." + Style.RESET_ALL)
-
-    # 2) trionine: depot keys from the shared dump, live gids from steamcmd
+    # 1) trionine: depot keys from the shared dump, live gids from steamcmd
     info = _steamcmd_appinfo(app_id)
     if info:
         depots_info = info.get("depots") or {}
