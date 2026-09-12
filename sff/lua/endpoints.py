@@ -353,7 +353,12 @@ def _ryuu_download_old(app_id, ryuu_key, dest, depotcache, file_type):
 def _ryuu_download_new(app_id, ryuu_key, branch="public", file_type="zip"):
     """New endpoint: X-Auth-Key header. Works for premium users."""
     headers = {"X-Auth-Key": ryuu_key}
-    params: dict = {"branch": branch}
+    params: dict = {}
+    # "public" 404s every app that has no public branch (Terraria); the
+    # endpoint defaults to the right branch when the param is absent, so
+    # only pass a branch the user actually picked.
+    if branch and branch != "public":
+        params["branch"] = branch
     if file_type != "zip":
         params["file_type"] = file_type
     try:
