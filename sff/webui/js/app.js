@@ -2985,14 +2985,42 @@ window.App = (function() {
             return;
         }
         if (action === 'linux_setup') {
-            Components.showToast('info', 'Running Linux setup...');
-            Bridge.call('linux_setup_now');
+            Bridge.callSync('steam_is_running', function(running) {
+                if (running === 'true') {
+                    Components.showConfirm(
+                        'Steam is running',
+                        'Linux setup closes Steam before installing. Save your game and continue?',
+                        function() {
+                            Components.showToast('info', 'Running Linux setup...');
+                            Bridge.call('linux_setup_now');
+                        },
+                        null, 'Close Steam', 'Cancel'
+                    );
+                } else {
+                    Components.showToast('info', 'Running Linux setup...');
+                    Bridge.call('linux_setup_now');
+                }
+            });
             return;
         }
 
         if (action === 'fix_slssteam_hash') {
-            Components.showToast('info', 'Fixing SLSsteam hash issue...');
-            Bridge.call('fix_slssteam_hash');
+            Bridge.callSync('steam_is_running', function(running) {
+                if (running === 'true') {
+                    Components.showConfirm(
+                        'Steam is running',
+                        'The hash fix closes Steam while it resets the injection. Save your game and continue?',
+                        function() {
+                            Components.showToast('info', 'Fixing SLSsteam hash issue...');
+                            Bridge.call('fix_slssteam_hash');
+                        },
+                        null, 'Close Steam', 'Cancel'
+                    );
+                } else {
+                    Components.showToast('info', 'Fixing SLSsteam hash issue...');
+                    Bridge.call('fix_slssteam_hash');
+                }
+            });
             return;
         }
 

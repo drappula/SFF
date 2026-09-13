@@ -1753,7 +1753,7 @@ def _bridge_linux_setup_now(bridge):
         try:
             from pathlib import Path as _Path
             from sff.linux.slssteam import (
-                detect_steam_type, install_from_github, setup_via_headcrab,
+                detect_steam_type, setup_via_headcrab,
                 is_steamos, bashrc_has_broken_prompt_guard,
             )
             from sff.downloads.dotnet_utils import ensure_dotnet_9
@@ -1768,12 +1768,16 @@ def _bridge_linux_setup_now(bridge):
                 steam_path = _Path.home() / ".var" / "app" / "com.valvesoftware.Steam" / ".steam" / "steam"
             else:
                 steam_path = _Path.home() / ".steam" / "steam"
+            # Headcrab closes Steam itself; do it here too so the user's games
+            # shut down cleanly before anything else touches the client.
+            from sff.linux.steam_process import kill_steam
+            kill_steam(log_lines.append)
             bridge.download_progress.emit(json.dumps({"status": "Running headcrab setup...", "progress": 20}))
             ok = setup_via_headcrab(steam_path, log_lines.append)
             if not ok:
-                bridge.download_progress.emit(json.dumps({"status": "headcrab failed, installing SLSsteam directly...", "progress": 50}))
-                log_lines.append("headcrab failed, falling back to direct SLSsteam install...")
-                install_from_github(steam_path, log_lines.append)
+                logger.warning("linux_setup_now: headcrab install failed")
+                log_lines.append("Headcrab install failed. See the guide for manual steps.")
+                return (False, "\n".join(str(x) for x in log_lines))
             bridge.download_progress.emit(json.dumps({"status": "Migrating existing games...", "progress": 70}))
             # Migrate any existing games from ACCELA or other tools
             try:
@@ -1854,6 +1858,13 @@ def _bridge_is_steamos(bridge):
     try:
         from sff.linux.slssteam import is_steamos
         return "true" if is_steamos() else ""
+    except Exception:
+        return ""
+
+def _bridge_steam_is_running(bridge):
+    try:
+        from sff.linux.slssteam import steam_is_running
+        return "true" if steam_is_running() else ""
     except Exception:
         return ""
 

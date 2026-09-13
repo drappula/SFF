@@ -307,7 +307,7 @@ def handle_linux_setup(steam_path: Path) -> None:
             "What would you like to do?",
             [
                 ("Check for updates", "check"),
-                ("Reinstall/update from GitHub", "reinstall"),
+                ("Reinstall/update via Headcrab", "reinstall"),
                 ("Skip", "skip"),
             ],
             cancellable=True,
@@ -338,7 +338,13 @@ def handle_linux_setup(steam_path: Path) -> None:
     else:
         print("SLSsteam is not installed.")
 
-    install_ok = slssteam.install_from_github(steam_path)
+    if slssteam.steam_is_running():
+        print(Fore.YELLOW + "Steam is running. Headcrab closes Steam before installing." + Style.RESET_ALL)
+        if not prompt_confirm("Continue and close Steam?", default=True):
+            print(Fore.GREEN + "\nSetup complete." + Style.RESET_ALL)
+            return
+
+    install_ok = slssteam.setup_via_headcrab(steam_path)
 
     if install_ok:
         print(Fore.GREEN + "\nSLSteam installed successfully." + Style.RESET_ALL)

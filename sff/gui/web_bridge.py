@@ -180,6 +180,7 @@ from sff.gui.bridges.misc_bridge import (
     _bridge_set_global_avatar,
     _bridge_set_setting,
     _bridge_signal_ready,
+    _bridge_steam_is_running,
     _bridge_steam_updates_get_state,
     _bridge_steam_updates_set_state,
     _bridge_test_ryuu_api_key,
@@ -2306,6 +2307,9 @@ class WebBridge(QObject):
     @pyqtSlot(result=str)
     def is_steamos(self):
         return _bridge_is_steamos(self)
+    @pyqtSlot(result=str)
+    def steam_is_running(self):
+        return _bridge_steam_is_running(self)
     @pyqtSlot(result=str)
     def enable_deck_safe_mode(self):
         return _bridge_enable_deck_safe_mode(self)
