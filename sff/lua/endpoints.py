@@ -308,19 +308,19 @@ def get_ryuu(dest, app_id, depotcache=None, request_update=None, branch=None, fi
 
         # Route to correct endpoint based on type
         if is_premium:
-            lua_bytes = _ryuu_download_new(app_id, ryuu_key, branch, file_type)
+            lua_bytes = _ryuu_download_new(app_id, ryuu_key, branch, file_type, depotcache)
         else:
             lua_bytes = _ryuu_download_old(app_id, ryuu_key, dest, depotcache, file_type)
         if lua_bytes is not None:
-            return _ryuu_save_lua(lua_bytes, dest, app_id)
+            return _ryuu_save_lua(lua_bytes, dest, app_id, depotcache)
 
         # If chosen endpoint failed, try the other one
         if is_premium:
             lua_bytes = _ryuu_download_old(app_id, ryuu_key, dest, depotcache, file_type)
         else:
-            lua_bytes = _ryuu_download_new(app_id, ryuu_key, branch, file_type)
+            lua_bytes = _ryuu_download_new(app_id, ryuu_key, branch, file_type, depotcache)
         if lua_bytes is not None:
-            return _ryuu_save_lua(lua_bytes, dest, app_id)
+            return _ryuu_save_lua(lua_bytes, dest, app_id, depotcache)
 
         attempt += 1
         print(Fore.RED + f"ryuu: both endpoints failed (Attempt {attempt}/{max_attempts})" + Style.RESET_ALL)
@@ -350,7 +350,7 @@ def _ryuu_download_old(app_id, ryuu_key, dest, depotcache, file_type):
     return _ryuu_extract_lua(resp, depotcache, file_type)
 
 
-def _ryuu_download_new(app_id, ryuu_key, branch="public", file_type="zip"):
+def _ryuu_download_new(app_id, ryuu_key, branch="public", file_type="zip", depotcache=None):
     """New endpoint: X-Auth-Key header. Works for premium users."""
     headers = {"X-Auth-Key": ryuu_key}
     params: dict = {}
@@ -370,7 +370,7 @@ def _ryuu_download_new(app_id, ryuu_key, branch="public", file_type="zip"):
         return None
     if resp.status_code != 200:
         return None
-    return _ryuu_extract_lua(resp, None, file_type)
+    return _ryuu_extract_lua(resp, depotcache, file_type)
 
 
 def _ryuu_extract_lua(resp, depotcache, file_type):
@@ -379,7 +379,25 @@ def _ryuu_extract_lua(resp, depotcache, file_type):
     return read_lua_from_zip(io.BytesIO(resp.content), decode=False, depotcache=depotcache)
 
 
-def _ryuu_save_lua(lua_bytes, dest, app_id):
+def _seed_missing_manifests(lua_bytes, app_id, depotcache):
+    """Fetch .manifest files for every setManifestid pin the Lua carries that
+    aren't in depotcache yet. Steam can't download a depot whose manifest is
+    missing (its own fetch is owner-gated), and the Windows add path assumes
+    providers seeded them. Providers that ship a bare .lua never do."""
+    if depotcache is None or not lua_bytes:
+        return
+    try:
+        text = lua_bytes.decode("utf-8", errors="ignore")
+    except Exception:
+        return
+    for depot_id, gid in re.findall(r'setManifestid\(\s*(\d+)\s*,\s*"?(\d+)"?\s*\)', text):
+        if (Path(depotcache) / f"{depot_id}_{gid}.manifest").exists():
+            continue
+        logger.debug("seed %s_%s.manifest missing from depotcache, fetching", depot_id, gid)
+        _seed_free_manifest(depot_id, gid, str(app_id), depotcache)
+
+
+def _ryuu_save_lua(lua_bytes, dest, app_id, depotcache=None):
     if lua_bytes is None:
         print(Fore.RED + "Ryuu: downloaded but no .lua content found." + Style.RESET_ALL)
         return None
@@ -387,6 +405,7 @@ def _ryuu_save_lua(lua_bytes, dest, app_id):
     with lua_path.open("wb") as f:
         f.write(lua_bytes)
     _update_fallback_depotkeys(lua_bytes)
+    _seed_missing_manifests(lua_bytes, app_id, depotcache)
     try:
         from sff.lua.dlc_appid_enricher import append_depotless_dlcs
         append_depotless_dlcs(lua_path, app_id)
@@ -483,6 +502,31 @@ def _seed_free_manifest(depot_id, gid, app_id, depotcache):
             return
 
 
+def _cached_lua_usable(lua_path: Path, depotcache) -> tuple[bool, str]:
+    """Decide whether a saved Lua is complete enough to reuse.
+
+    A run interrupted by provider rate limits leaves a keyless addappid-only
+    Lua on disk; reusing it makes every retry silently reinstall a broken
+    game. Trust the cache only when every depot pin already has its .manifest
+    on disk, and report what's missing. DLC stubs (addappid with no key and
+    no pin) are normal and don't count against the Lua.
+    """
+    try:
+        text = lua_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False, "unreadable"
+    pins = re.findall(r'setManifestid\(\s*(\d+)\s*,\s*"?(\d+)"?\s*\)', text)
+    has_keys = bool(re.search(r'addappid\(\s*\d+\s*,\s*0\s*,', text))
+    if not has_keys:
+        return False, "no depot keys"
+    if depotcache is not None and pins:
+        missing = [f"{d}_{g}" for d, g in pins
+                   if not (Path(depotcache) / f"{d}_{g}.manifest").exists()]
+        if missing:
+            return False, f"missing manifest {missing[0]}"
+    return True, ""
+
+
 def get_freelua(dest, app_id, depotcache=None):
     """Keyless Lua from the free community providers, in priority order:
     trionine ManifestHub (built client-side from depotkeys.json + steamcmd
@@ -495,8 +539,12 @@ def get_freelua(dest, app_id, depotcache=None):
     app_id = str(app_id)
     lua_path = Path(dest) / f"{app_id}.lua"
     if lua_path.exists() and lua_path.stat().st_size > 0:
-        print(Fore.GREEN + f"[Cached] Using existing Lua for {app_id}" + Style.RESET_ALL)
-        return lua_path
+        usable, reason = _cached_lua_usable(lua_path, depotcache)
+        if usable:
+            print(Fore.GREEN + f"[Cached] Using existing Lua for {app_id}" + Style.RESET_ALL)
+            return lua_path
+        print(Fore.YELLOW + f"Cached Lua for {app_id} is incomplete ({reason}), refetching..." + Style.RESET_ALL)
+        logger.debug("freelua %s: cached lua incomplete (%s), refetching", app_id, reason)
 
     # 1) trionine: depot keys from the shared dump, live gids from steamcmd
     info = _steamcmd_appinfo(app_id)
@@ -576,7 +624,7 @@ def get_freelua(dest, app_id, depotcache=None):
     return None
 
 
-def get_depotbox(dest, app_id, depotbox_key=None):
+def get_depotbox(dest, app_id, depotbox_key=None, depotcache=None):
     """Download a .lua file from DepotBox.
     Uses the direct-lua endpoint which returns just the .lua text.
     Requires a DepotBox API key. Rate limit: 60/min (Starter) or 120/min (Pro).
@@ -645,6 +693,7 @@ def get_depotbox(dest, app_id, depotbox_key=None):
         lua_path = dest / f"{app_id}.lua"
         lua_path.write_text(lua_text, encoding="utf-8")
         _update_fallback_depotkeys(lua_text.encode("utf-8"))
+        _seed_missing_manifests(lua_text.encode("utf-8", errors="ignore"), app_id, depotcache)
         try:
             from sff.lua.dlc_appid_enricher import append_depotless_dlcs
             append_depotless_dlcs(lua_path, app_id)
@@ -727,3 +776,24 @@ def fetch_build_details(build_id):
     except Exception:
         return None
     return pins or None
+
+
+if __name__ == "__main__":
+    import tempfile
+    from pathlib import Path as _P
+    _tmp = _P(tempfile.mkdtemp())
+    _dc = _tmp / "depotcache"; _dc.mkdir()
+    _keyless = _tmp / "1.lua"; _keyless.write_text("addappid(105600)\n")
+    assert not _cached_lua_usable(_keyless, _dc)[0]
+    _good = _tmp / "2.lua"
+    _good.write_text(
+        'addappid(105600)\naddappid(105601,0,"ab")\nsetManifestid(105601,"777")\naddappid(2216390)\n')
+    (_dc / "105601_777.manifest").write_bytes(b"x")
+    assert _cached_lua_usable(_good, _dc)[0]
+    _lost = _tmp / "3.lua"
+    _lost.write_text('addappid(105601,0,"ab")\nsetManifestid(105601,"888")\n')
+    ok, why = _cached_lua_usable(_lost, _dc)
+    assert not ok and "888" in why
+    assert _cached_lua_usable(_lost, None)[0]
+    assert not _cached_lua_usable(_tmp / "missing.lua", _dc)[0]
+    print("endpoints self-check OK")

@@ -262,7 +262,7 @@ def _download_from_endpoint(dest, app_id, source, steam_path=None, request_updat
             file_type=file_type,
         )
     if source == LuaEndpoint.DEPOTBOX:
-        return get_depotbox(dest, app_id)
+        return get_depotbox(dest, app_id, depotcache=_depotcache_for(steam_path))
     return None
 
 

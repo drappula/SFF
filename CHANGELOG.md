@@ -16,6 +16,9 @@
 - **Manifest sources prefer free mirrors** - the public GMRC mirrors (steam.run, wudrm, opensteamtool) are gone; they now answer 403/404 everywhere. Manifest fetches try the GitHub manifest mirrors before ManifestHub, so the API-key prompt no longer interrupts a download that a free source can finish.
 - **Download speed limit** - Settings has a "Download Speed Limit (MB/s, 0 = no limit)" box that caps the built-in downloader's wire rate across all chunks and parallel depot downloads. Does not apply to Steam/LumaCore downloads or DepotDownloaderMod.
 - **Ryuu key hints** - Ryuu links now open generator.ryuu.lol/api, and the key dialog and Settings tooltip say to log in first: the key shows up as "auth_key" only after signing in.
+- **SLSsteam installs via Headcrab** - Linux SLSsteam installs run the h3adcr-b Headcrab script, which keeps the Steam client at a version the injection supports. The background update check won't install while Steam is running.
+- **Steam Updates tile on Linux** - the Home tab's block/unblock tile works on Linux too. Turning client auto-updates back on is one click, not a steam.cfg edit.
+- **Asks before closing Steam** - Linux Setup and the hash fix confirm before closing a running Steam client, so they never kill a game mid-session.
 
 ### Removed
 
@@ -23,6 +26,8 @@
 
 ### Fixed
 
+- **Ryuu and DepotBox games download again** - Ryuu premium-key and DepotBox Lua files no longer arrive without their manifest files, so the game is complete when Steam starts pulling it instead of idling at zero.
+- **Retrying a game after lost manifests** - a download interrupted by provider rate limits left a partial Lua behind, and every retry reused it: the depot came up keyless, the game appeared added, and nothing downloaded. Free Providers now check that the cached Lua has real keys and its manifests are on disk, and refetch when either is missing.
 - **Windows downloads use LumaCore again** - 6.6.7d switched Windows to the built-in downloader. Windows now registers the game and hands the files to Steam/LumaCore. If registration fails, usually because Steam holds the files locked, the download says so instead of claiming the game is in your library.
 - **Downloads stalling on "Parsing Lua..."** - the check for whether a game is already registered re-scanned the whole Steam plug-in folder and the full game list to answer one yes-or-no question; it now reads that game's file directly.
 - **Warns when Steam won't close** - download setup logs a warning if the kill leaves Steam running; the locked config writes that follow used to fail silently.
