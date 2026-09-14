@@ -375,6 +375,7 @@ def _bridge_run_windows_fastest(bridge, app_id, source='', request_update=False,
     downloader is the Linux one."""
     try:
         from sff.lua.choices import download_lua_direct
+        from sff.lua.endpoints import POPUP_SHOWN
         from sff.lua.manager import parse_lua_contents
         from sff.lua.writer import ACFWriter, ConfigVDFWriter
         from sff.steam_tools_compat import install_lua_to_steam
@@ -414,6 +415,10 @@ def _bridge_run_windows_fastest(bridge, app_id, source='', request_update=False,
             branch=branch,
             file_type=file_type,
         )
+        if lua_path == POPUP_SHOWN:
+            # The not-found dialog already offered the free fallback; the
+            # "Pick Source" modal below would just talk over it.
+            return False
         if not lua_path:
             # download_lua_direct returns None on timeout against the Steam
             # CM (30s ceiling) or any other source error. The sentinel tells
@@ -1895,11 +1900,17 @@ def _bridge_fetch_depot_filetree(bridge, app_id, depot_id, lua_path=''):
                     _lua_dest = _P.cwd() / "saved_lua"
                     _lua_dest.mkdir(parents=True, exist_ok=True)
                     _dc_zip = _P(steam_path) / "depotcache" if steam_path else None
-                    from sff.lua.endpoints import get_hubcap, get_ryuu
+                    from sff.lua.endpoints import get_hubcap, get_ryuu, NOT_FOUND, POPUP_SHOWN
                     _f = get_hubcap(_lua_dest, aid, depotcache=_dc_zip, hubcap_key=_hk) if _hk else None
-                    if _f is None and _rk:
+                    # NOT_FOUND/POPUP_SHOWN are strings; a catalog miss on
+                    # one provider must not stop the other from being tried.
+                    if _f in (NOT_FOUND, POPUP_SHOWN):
+                        _f = None
+                    if not _f and _rk:
                         _f = get_ryuu(_lua_dest, aid, request_update=False, branch="public",
                                       file_type="zip", depotcache=_dc_zip)
+                    if _f in (NOT_FOUND, POPUP_SHOWN):
+                        _f = None
                     _step("bundle fetch returned %s" % (_f or "None"))
                     if _f:
                         _lf = _P(_f)
@@ -2059,7 +2070,6 @@ def _bridge_download_game_ddmod(bridge, app_id, source, lua_path, manifest_folde
             import io
             import sys
             from pathlib import Path as _Path
-            from sff.lua.endpoints import get_hubcap, get_freelua, get_ryuu, get_depotbox
             from sff.lua.manager import parse_lua_contents
             from sff.downloads.depot_downloader import run_download, filter_depots_by_os
 
@@ -2140,18 +2150,22 @@ def _bridge_download_game_ddmod(bridge, app_id, source, lua_path, manifest_folde
                 "app_id": app_id, "status": "Fetching Lua file...", "progress": 0
             }))
 
+            from sff.lua.choices import download_lua_direct
+            from sff.core.structs import LuaEndpoint
+            _src_map = {"hubcap": LuaEndpoint.HUBCAP, "freelua": LuaEndpoint.FREELUA,
+                        "ryuu": LuaEndpoint.RYUU, "depotbox": LuaEndpoint.DEPOTBOX}
             if source == "local":
                 lua_file = _Path(lua_path) if lua_path else None
                 if not lua_file or not lua_file.exists():
                     return (False, f"Lua file not found: {lua_path}")
-            elif source == "hubcap":
-                lua_file = get_hubcap(lua_dest, app_id, depotcache=(steam_path / "depotcache") if steam_path else None, hubcap_key=bridge._api_key)
-            elif source == "freelua":
-                lua_file = get_freelua(lua_dest, app_id, depotcache=(steam_path / "depotcache") if steam_path else None)
-            elif source == "ryuu":
-                lua_file = get_ryuu(lua_dest, app_id, request_update=False, branch=branch, file_type=file_type, depotcache=(steam_path / "depotcache") if steam_path else None)
-            elif source == "depotbox":
-                lua_file = get_depotbox(lua_dest, app_id)
+            elif source in _src_map:
+                # One choke point for the not-found popups; download_lua_direct
+                # handles the whole chain, so the per-source calls below are
+                # gone.
+                lua_file = download_lua_direct(
+                    lua_dest, app_id, _src_map[source], steam_path=steam_path,
+                    request_update=False, branch=branch, file_type=file_type,
+                )
             else:
                 return (False, f"Unknown source: {source}")
 

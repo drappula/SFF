@@ -26,6 +26,7 @@
 
 ### Fixed
 
+- **Missing games get a real answer** - when the chosen source doesn't have a game, SteaMidra now says so and offers to fall back to Free Providers, instead of looping "enter a new API key" on a plain 404 (Ryuu) or failing quietly. If Free Providers don't have it either, a dialog points to the providers' Discords to request the game.
 - **Ryuu and DepotBox games download again** - Ryuu premium-key and DepotBox Lua files no longer arrive without their manifest files, so the game is complete when Steam starts pulling it instead of idling at zero.
 - **Retrying a game after lost manifests** - a download interrupted by provider rate limits left a partial Lua behind, and every retry reused it: the depot came up keyless, the game appeared added, and nothing downloaded. Free Providers now check that the cached Lua has real keys and its manifests are on disk, and refetch when either is missing.
 - **Windows downloads use LumaCore again** - 6.6.7d switched Windows to the built-in downloader. Windows now registers the game and hands the files to Steam/LumaCore. If registration fails, usually because Steam holds the files locked, the download says so instead of claiming the game is in your library.

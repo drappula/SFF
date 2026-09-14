@@ -30,7 +30,10 @@ from sff.fzf import run_fzf
 from sff.network.http_utils import download_to_tempfile
 
 logger = logging.getLogger(__name__)
-from sff.lua.endpoints import get_hubcap, get_freelua, get_ryuu, get_depotbox
+from sff.lua.endpoints import (
+    get_hubcap, get_freelua, get_ryuu, get_depotbox,
+    NOT_FOUND, POPUP_SHOWN, popup_free_not_found, popup_offer_fallback,
+)
 from sff.ui.prompts import prompt_confirm, prompt_file, prompt_select, prompt_text
 from sff.core.storage.settings import get_setting, set_setting
 from sff.core.strings import STEAM_WEB_API_KEY
@@ -246,24 +249,59 @@ def _depotcache_for(steam_path):
     return Path(steam_path) / "depotcache"
 
 
+_SOURCE_SHORT = {
+    LuaEndpoint.FREELUA: "Free Providers",
+    LuaEndpoint.HUBCAP: "Hubcap",
+    LuaEndpoint.RYUU: "Ryuu",
+    LuaEndpoint.DEPOTBOX: "DepotBox",
+}
+
+
 def _download_from_endpoint(dest, app_id, source, steam_path=None, request_update=None,
                             branch=None, file_type=None):
+    """Fetch a Lua from one provider. A catalog miss pops the not-found
+    dialogs here, the one choke point every GUI/CLI/DDMod download runs
+    through, so no caller has to know what NOT_FOUND is."""
+    dc = _depotcache_for(steam_path)
     if source == LuaEndpoint.FREELUA:
-        return get_freelua(dest, app_id, depotcache=_depotcache_for(steam_path))
-    if source == LuaEndpoint.HUBCAP:
-        return get_hubcap(dest, app_id, depotcache=_depotcache_for(steam_path))
-    if source == LuaEndpoint.RYUU:
-        return get_ryuu(
+        result = get_freelua(dest, app_id, depotcache=dc)
+    elif source == LuaEndpoint.HUBCAP:
+        result = get_hubcap(dest, app_id, depotcache=dc)
+    elif source == LuaEndpoint.RYUU:
+        result = get_ryuu(
             dest,
             app_id,
-            depotcache=_depotcache_for(steam_path),
+            depotcache=dc,
             request_update=request_update,
             branch=branch,
             file_type=file_type,
         )
-    if source == LuaEndpoint.DEPOTBOX:
-        return get_depotbox(dest, app_id, depotcache=_depotcache_for(steam_path))
-    return None
+    elif source == LuaEndpoint.DEPOTBOX:
+        result = get_depotbox(dest, app_id, depotcache=dc)
+    else:
+        return None
+    if result != NOT_FOUND:
+        return result
+    return _handle_not_found(dest, app_id, source, dc)
+
+
+def _handle_not_found(dest, app_id, source, depotcache):
+    # Chosen provider doesn't have the game. Ask what to do next instead of
+    # failing quietly (or, before, nagging "enter a new API key" for a 404).
+    # POPUP_SHOWN is falsy like a failure but tells the download bridges
+    # the dialog already resolved the case, so they don't stack a second
+    # "pick a source" modal. Declining the fallback returns plain None: the
+    # source picker is then the sensible next step, same as before.
+    if source == LuaEndpoint.FREELUA:
+        popup_free_not_found()
+        return POPUP_SHOWN
+    if not popup_offer_fallback(_SOURCE_SHORT.get(source, source.name)):
+        return None
+    result = get_freelua(dest, app_id, depotcache=depotcache)
+    if result and result != NOT_FOUND:
+        return result
+    popup_free_not_found()
+    return POPUP_SHOWN
 
 
 def download_lua(dest, os_type):
@@ -281,7 +319,9 @@ def download_lua(dest, os_type):
         source,
         steam_path=get_setting(Settings.STEAM_PATH),
     )
-    if lua_path is None:
+    # _download_from_endpoint returns Path, None, or POPUP_SHOWN (falsy:
+    # the dialog already ran). Both falsy cases mean "no lua, back out".
+    if not lua_path:
         return LuaResult(None, None, LuaChoiceReturnCode.GO_BACK)
     return LuaResult(lua_path, None, LuaChoiceReturnCode.LOOP, endpoint=source)
 

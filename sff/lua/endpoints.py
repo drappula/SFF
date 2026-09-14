@@ -37,6 +37,52 @@ from sff.zip import read_lua_from_zip
 
 logger = logging.getLogger(__name__)
 
+# Providers return NOT_FOUND when their catalog simply lacks the game,
+# instead of None which means "failed for another reason" (network, key,
+# rate limit). _download_from_endpoint in choices.py turns NOT_FOUND into
+# the not-found popups. A handled miss comes back as POPUP_SHOWN: falsy
+# like a failure (so every "if not lua_path" guard still works), but the
+# download bridges skip their "pick a different source" modal on it since
+# the dialog just explained the situation.
+NOT_FOUND = "not-found"
+POPUP_SHOWN = ""
+
+
+def popup_free_not_found():
+    # OK-only dialog; every free source checked and none has this game.
+    prompt_select(
+        "Manifest files not found for your game in Free Providers. "
+        "Try using Hubcap/Ryuu/DepotBox download sources. If they're not "
+        "found either, join their Discord servers and request the game.",
+        [("OK", True)],
+        cancellable=False,
+    )
+
+
+def popup_offer_fallback(source_label):
+    return prompt_confirm(
+        f"Manifest files not found for your game in {source_label}. "
+        "Fall back to Free Providers?",
+        default=True,
+    )
+
+
+def _freelua_after_dead_key(dest, app_id, depotcache=None):
+    # A rejected key is the provider's last word on this app; the free
+    # chain is keyless and independent, so finish with it when present.
+    # This already IS the fallback, so the free popup runs here instead of
+    # letting the dispatcher offer the same fallback a second time.
+    print(Fore.YELLOW + f"API key rejected; falling back to Free Providers for {app_id}." + Style.RESET_ALL)
+    try:
+        path = get_freelua(dest, app_id, depotcache=depotcache)
+    except Exception:
+        return None
+    if path == NOT_FOUND:
+        popup_free_not_found()
+        return POPUP_SHOWN
+    return path
+
+
 def _update_fallback_depotkeys(lua_bytes):
     try:
         update_cache_from_lua_bytes(lua_bytes)
@@ -55,16 +101,6 @@ def _set_provider_key_flag(setting, dead):
             clear_setting(setting)
     except Exception:
         logger.debug("provider key flag write failed", exc_info=True)
-
-
-def _freelua_after_dead_key(dest, app_id, depotcache=None):
-    # A rejected key is the provider's last word on this app; the free
-    # chain is keyless and independent, so finish with it when present.
-    print(Fore.YELLOW + f"API key rejected; falling back to Free Providers for {app_id}." + Style.RESET_ALL)
-    try:
-        return get_freelua(dest, app_id, depotcache=depotcache)
-    except Exception:
-        return None
 
 
 def get_hubcap(dest, app_id, depotcache = None, hubcap_key = None):
@@ -207,6 +243,7 @@ def get_hubcap(dest, app_id, depotcache = None, hubcap_key = None):
                                 "Try Ryuu or oureveryday for this game."
                                 + Style.RESET_ALL
                             )
+                            return NOT_FOUND
                         else:
                             print(
                                 Fore.RED
@@ -306,19 +343,22 @@ def get_ryuu(dest, app_id, depotcache=None, request_update=None, branch=None, fi
             else:
                 set_setting(Settings.RYUU_KEY, ryuu_key)
 
-        # Route to correct endpoint based on type
+        # A 404 means the game simply is not in Ryuu's catalog for this
+        # key type/branch — the other endpoint shares that catalog, so
+        # don't retry it. Report NOT_FOUND so the dispatcher offers the
+        # free-source fallback instead of looping on new-key prompts.
         if is_premium:
             lua_bytes = _ryuu_download_new(app_id, ryuu_key, branch, file_type, depotcache)
+            if lua_bytes is None:
+                lua_bytes = _ryuu_download_old(app_id, ryuu_key, dest, depotcache, file_type)
         else:
             lua_bytes = _ryuu_download_old(app_id, ryuu_key, dest, depotcache, file_type)
-        if lua_bytes is not None:
-            return _ryuu_save_lua(lua_bytes, dest, app_id, depotcache)
-
-        # If chosen endpoint failed, try the other one
-        if is_premium:
-            lua_bytes = _ryuu_download_old(app_id, ryuu_key, dest, depotcache, file_type)
-        else:
-            lua_bytes = _ryuu_download_new(app_id, ryuu_key, branch, file_type, depotcache)
+            if lua_bytes is None:
+                lua_bytes = _ryuu_download_new(app_id, ryuu_key, branch, file_type, depotcache)
+        if lua_bytes == NOT_FOUND:
+            print(Fore.YELLOW + f"Ryuu: App {app_id} is not available from this source (branch: {branch})." + Style.RESET_ALL)
+            logger.debug("ryuu %s: 404, not available (premium=%s, branch=%s)", app_id, is_premium, branch)
+            return NOT_FOUND
         if lua_bytes is not None:
             return _ryuu_save_lua(lua_bytes, dest, app_id, depotcache)
 
@@ -336,7 +376,9 @@ def get_ryuu(dest, app_id, depotcache=None, request_update=None, branch=None, fi
 
 
 def _ryuu_download_old(app_id, ryuu_key, dest, depotcache, file_type):
-    """Old endpoint: auth_code URL param. Works for normal users."""
+    """Old endpoint: auth_code URL param. Works for normal users.
+    A 404 means the catalog lacks this app or the key type doesn't cover
+    it (not a wrong key), so it returns the NOT_FOUND sentinel."""
     url = "https://generator.ryuu.lol/secure_download"
     params = {"appid": str(app_id), "auth_code": ryuu_key}
     if file_type == "lua":
@@ -345,13 +387,16 @@ def _ryuu_download_old(app_id, ryuu_key, dest, depotcache, file_type):
         resp = httpx.get(url, params=params, timeout=60, follow_redirects=True)
     except Exception:
         return None
+    if resp.status_code == 404:
+        return NOT_FOUND
     if resp.status_code != 200:
         return None
     return _ryuu_extract_lua(resp, depotcache, file_type)
 
 
 def _ryuu_download_new(app_id, ryuu_key, branch="public", file_type="zip", depotcache=None):
-    """New endpoint: X-Auth-Key header. Works for premium users."""
+    """New endpoint: X-Auth-Key header. Works for premium users.
+    Returns NOT_FOUND on 404 (see _ryuu_download_old)."""
     headers = {"X-Auth-Key": ryuu_key}
     params: dict = {}
     # "public" 404s every app that has no public branch (Terraria); the
@@ -368,6 +413,8 @@ def _ryuu_download_new(app_id, ryuu_key, branch="public", file_type="zip", depot
         )
     except Exception:
         return None
+    if resp.status_code == 404:
+        return NOT_FOUND
     if resp.status_code != 200:
         return None
     return _ryuu_extract_lua(resp, depotcache, file_type)
@@ -621,7 +668,7 @@ def get_freelua(dest, app_id, depotcache=None):
         return lua_path
 
     print(Fore.RED + f"No free provider has App {app_id}." + Style.RESET_ALL)
-    return None
+    return NOT_FOUND
 
 
 def get_depotbox(dest, app_id, depotbox_key=None, depotcache=None):
@@ -670,13 +717,13 @@ def get_depotbox(dest, app_id, depotbox_key=None, depotcache=None):
             print(Fore.RED + "DepotBox: Invalid API key." + Style.RESET_ALL)
             set_setting(Settings.DEPOTBOX_KEY, "")
             _set_provider_key_flag(Settings.DEPOTBOX_KEY_DEAD, True)
-            return _freelua_after_dead_key(dest, app_id)
+            return _freelua_after_dead_key(dest, app_id, depotcache)
         if resp.status_code == 403:
             print(Fore.RED + f"DepotBox: {resp.text[:300]}" + Style.RESET_ALL)
             return None
         if resp.status_code == 404:
             print(Fore.YELLOW + f"DepotBox: No depot keys for App {app_id}. Try another provider." + Style.RESET_ALL)
-            return None
+            return NOT_FOUND
         if resp.status_code == 429:
             print(Fore.YELLOW + f"DepotBox: Rate limit ({rate_limit}/min) exceeded. {resp.text[:200]}" + Style.RESET_ALL)
             return None
@@ -796,4 +843,22 @@ if __name__ == "__main__":
     assert not ok and "888" in why
     assert _cached_lua_usable(_lost, None)[0]
     assert not _cached_lua_usable(_tmp / "missing.lua", _dc)[0]
+
+    # ryuu 404s report the catalog miss, other failures stay None
+    import httpx as _httpx
+
+    class _R:
+        def __init__(self, code): self.status_code = code; self.content = b""
+
+    _orig_get = _httpx.get
+    try:
+        _httpx.get = lambda *a, **k: _R(404)
+        assert _ryuu_download_new("1", "k", "public", "zip") == NOT_FOUND
+        assert _ryuu_download_old("1", "k", _tmp, None, "zip") == NOT_FOUND
+        _httpx.get = lambda *a, **k: _R(500)
+        assert _ryuu_download_new("1", "k", "public", "zip") is None
+        assert _ryuu_download_old("1", "k", _tmp, None, "zip") is None
+    finally:
+        _httpx.get = _orig_get
+    assert not POPUP_SHOWN  # falsy, like a failed download
     print("endpoints self-check OK")

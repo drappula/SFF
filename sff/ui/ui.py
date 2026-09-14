@@ -987,8 +987,11 @@ class UI:
             saved_lua, app_id, source, self.steam_path,
             request_update=request_update if source == LuaEndpoint.RYUU else None,
         )
-        if lua_path is None:
-            print(Fore.RED + "Failed to download Lua file. Aborting." + Style.RESET_ALL)
+        if not lua_path:
+            # None = fetch failed; POPUP_SHOWN ("") = the not-found dialog
+            # already handled it and the user declined the free fallback.
+            if lua_path is None:
+                print(Fore.RED + "Failed to download Lua file. Aborting." + Style.RESET_ALL)
             return MainReturnCode.LOOP_NO_PROMPT
         try:
             lua_contents = lua_path.read_text(encoding="utf-8")
