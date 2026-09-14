@@ -2765,6 +2765,41 @@ def _bridge_delete_game(bridge, app_id, game_path, mode):
         except Exception as e:
             logger.warning("delete_game: config.yaml cleanup failed: %s", e)
 
+        # Purge this game's .manifest files from depotcache and the staging
+        # dir. Steam only deletes depotcache entries when it happens to prune
+        # them, and the watcher restores anything left in staging, so a
+        # re-add kept reading the old-gid manifest and the game never saw
+        # updates. Staging first, so a watcher can't refill depotcache
+        # mid-delete.
+        try:
+            from sff.core.utils import manifests_staging_dir
+            from sff.lua.manager import parse_lua_contents as _plc
+            purge_depots = {str(app_id_int)}
+            _lua = Path.cwd() / "saved_lua" / f"{app_id_int}.lua"
+            if _lua.exists():
+                _p = _plc(_lua.read_text(encoding="utf-8", errors="replace"), _lua)
+                for _pair in (_p.depots if _p else []):
+                    purge_depots.add(str(_pair.depot_id))
+            purge_dirs = [manifests_staging_dir()]
+            if bridge._steam_path:
+                purge_dirs.append(bridge._steam_path / "depotcache")
+                purge_dirs.append(bridge._steam_path / "config" / "depotcache")
+            purged = 0
+            for _d in purge_dirs:
+                if not _d.is_dir():
+                    continue
+                for _dep in purge_depots:
+                    for mf in _d.glob(f"{_dep}_*.manifest"):
+                        try:
+                            mf.unlink()
+                            purged += 1
+                        except OSError:
+                            pass
+            if purged:
+                logger.info("delete_game: purged %d manifest file(s) for %s", purged, app_id_int)
+        except Exception as e:
+            logger.warning("delete_game: manifest purge failed: %s", e)
+
         files_deleted = False
 
         if bridge._steam_path:
