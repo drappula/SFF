@@ -692,8 +692,8 @@ def _bridge_run_linux_ddmod_fallback(bridge, app_id, manifest_override, lib_path
 
 # ── DLC download ──────────────────────────────────────────────────────
 
-def _bridge_download_dlc_oureveryday(bridge, dlc_appid, parent_appid):
-    """Oureveryday DLC-only path: pull just the DLCs depot manifest +
+def _bridge_download_dlc_free(bridge, dlc_appid, parent_appid):
+    """Free Providers DLC-only path: pull just the DLCs depot manifest +
     decryption key without re-downloading the parent game.
 
     Flow:
@@ -726,7 +726,7 @@ def _bridge_download_dlc_oureveryday(bridge, dlc_appid, parent_appid):
             from sff.network.steam_client import create_provider_for_current_thread
             from sff.manifest.downloader import ManifestDownloader
         except Exception as e:
-            logger.exception("download_dlc_oureveryday: import failed: %s", e)
+            logger.exception("download_dlc_free: import failed: %s", e)
             return (False, f"Internal error: {e}")
 
         steam_path = bridge._steam_path
@@ -768,7 +768,7 @@ def _bridge_download_dlc_oureveryday(bridge, dlc_appid, parent_appid):
                 # fired; just abandon the worker thread.
                 _ex.shutdown(wait=False)
         except Exception as e:
-            logger.warning("download_dlc_oureveryday: provider failed: %s", e)
+            logger.warning("download_dlc_free: provider failed: %s", e)
             return (False, f"Steam query failed: {e}")
         if not parent_info:
             return (False, f"Steam returned no info for parent app {parent_appid}")
@@ -810,7 +810,7 @@ def _bridge_download_dlc_oureveryday(bridge, dlc_appid, parent_appid):
                                 _flat[str(_dk)] = str(_dv or "")
                         keys_dict = _flat
             except Exception as e:
-                logger.debug("download_dlc_oureveryday: key db load failed: %s", e)
+                logger.debug("download_dlc_free: key db load failed: %s", e)
 
         cdn = None
         downloader = None
@@ -825,12 +825,12 @@ def _bridge_download_dlc_oureveryday(bridge, dlc_appid, parent_appid):
             try:
                 cdn = downloader.get_cdn_client()
             except Exception as e:
-                logger.debug("download_dlc_oureveryday: cdn client failed: %s", e)
+                logger.debug("download_dlc_free: cdn client failed: %s", e)
 
             for depot_id, gid in dlc_depots:
                 key = keys_dict.get(depot_id)
                 if not key:
-                    logger.debug("download_dlc_oureveryday: no bundled key for depot %s", depot_id)
+                    logger.debug("download_dlc_free: no bundled key for depot %s", depot_id)
                     continue
                 if not gid:
                     # No public manifest GID listed. Still add the key line
@@ -843,14 +843,14 @@ def _bridge_download_dlc_oureveryday(bridge, dlc_appid, parent_appid):
                         depot_id, gid, cdn_client=cdn, app_id=str(parent_appid),
                     )
                 except Exception as e:
-                    logger.debug("download_dlc_oureveryday: depot %s fetch raised: %s", depot_id, e)
+                    logger.debug("download_dlc_free: depot %s fetch raised: %s", depot_id, e)
                     raw = None
                 if raw:
                     try:
                         if downloader._write_manifest_to_depotcache(raw, depot_id, gid, decrypt=False, dec_key=key):
                             saved += 1
                     except Exception as e:
-                        logger.debug("download_dlc_oureveryday: write %s_%s failed: %s", depot_id, gid, e)
+                        logger.debug("download_dlc_free: write %s_%s failed: %s", depot_id, gid, e)
                 new_lines.append(f'addappid({depot_id}, 1, "{key}")')
         else:
             bridge.download_progress.emit(_json.dumps({
@@ -877,7 +877,7 @@ def _bridge_download_dlc_oureveryday(bridge, dlc_appid, parent_appid):
             try:
                 existing_text = lua_path.read_text(encoding="utf-8", errors="replace")
             except Exception as e:
-                logger.warning("download_dlc_oureveryday: could not read existing lua: %s", e)
+                logger.warning("download_dlc_free: could not read existing lua: %s", e)
                 existing_text = ""
         if not existing_text:
             # Fresh lua. Seed with parent appid line so LumaCore picks
@@ -902,7 +902,7 @@ def _bridge_download_dlc_oureveryday(bridge, dlc_appid, parent_appid):
             try:
                 lua_path.write_text(existing_text, encoding="utf-8")
             except Exception as e:
-                logger.exception("download_dlc_oureveryday: lua write failed: %s", e)
+                logger.exception("download_dlc_free: lua write failed: %s", e)
                 return (False, f"Failed to write parent lua: {e}")
 
          # Step 5: update parent ACF with DLC depot entries so Steam
@@ -951,12 +951,12 @@ def _bridge_download_dlc_oureveryday(bridge, dlc_appid, parent_appid):
                     except OSError:
                         pass
                     logger.info(
-                        "download_dlc_oureveryday: patched %s with %d DLC depot(s)",
+                        "download_dlc_free: patched %s with %d DLC depot(s)",
                         _acf.name, len(dlc_depots),
                     )
                 break
         except Exception as e:
-            logger.exception("download_dlc_oureveryday: ACF update failed: %s", e)
+            logger.exception("download_dlc_free: ACF update failed: %s", e)
 
         # Step 6: download actual DLC depot files so the content
         # exists on disk (not just manifest + ACF entries with 0 MB).
@@ -984,12 +984,12 @@ def _bridge_download_dlc_oureveryday(bridge, dlc_appid, parent_appid):
                     )
                     if _ok:
                         dlc_downloaded += 1
-                        logger.debug("download_dlc_oureveryday: DLC depot %s downloaded (%s bytes)", _did, _sz)
+                        logger.debug("download_dlc_free: DLC depot %s downloaded (%s bytes)", _did, _sz)
                 except ImportError:
-                    logger.debug("download_dlc_oureveryday: native downloader not available, skipping depot download")
+                    logger.debug("download_dlc_free: native downloader not available, skipping depot download")
                     break
                 except Exception as _e:
-                    logger.debug("download_dlc_oureveryday: DLC depot %s download failed: %s", _did, _e)
+                    logger.debug("download_dlc_free: DLC depot %s download failed: %s", _did, _e)
 
         # Register DLC in SLSsteam on Linux so it shows in Steam properties
         if sys.platform == "linux":
@@ -997,7 +997,7 @@ def _bridge_download_dlc_oureveryday(bridge, dlc_appid, parent_appid):
                 if hasattr(bridge._ui, "sls_man") and bridge._ui.sls_man:
                     bridge._ui.sls_man.add_ids([int(dlc_appid)])
             except Exception as e:
-                logger.warning("download_dlc_oureveryday: SLSsteam DLC registration failed: %s", e)
+                logger.warning("download_dlc_free: SLSsteam DLC registration failed: %s", e)
 
         bridge.download_progress.emit(_json.dumps({
             "app_id": dlc_appid, "status": "Complete", "progress": 100

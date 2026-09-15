@@ -240,7 +240,7 @@ def get_hubcap(dest, app_id, depotcache = None, hubcap_key = None):
                             print(
                                 Fore.RED
                                 + f"Hubcap: app {app_id} is not in the Hubcap database. "
-                                "Try Ryuu or oureveryday for this game."
+                                "Try Ryuu or Free Providers for this game."
                                 + Style.RESET_ALL
                             )
                             return NOT_FOUND

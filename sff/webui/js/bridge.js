@@ -138,7 +138,7 @@ window.Bridge = (function() {
             fetch_depot_history: function() {},
             download_game_fastest: function() {},
             download_game_version: function() {},
-            download_dlc_oureveryday: function() {},
+            download_dlc_free: function() {},
             run_game_action: function() {},
             dlc_check_get_list: function() {},
             enqueue_dropped_blobs: function() {},

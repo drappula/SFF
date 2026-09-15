@@ -14,7 +14,7 @@ If any credit, license, author, source, or ownership note is missing or unclear,
 
 ### DDMod / DepotDownloaderMod
 
-Author / maintainer: oureveryday
+Author / maintainer: SteamAutoCracks project
 Path: `third_party/DDMod`
 License file: `third_party_licenses/DDMod.LICENSE`
 Bundled: Yes
@@ -24,7 +24,7 @@ Notes: DDMod remains owned by its original author/maintainer and is not licensed
 
 ### SteamAutoCrack CLI
 
-Author / maintainer: oureveryday
+Author / maintainer: SteamAutoCracks project
 Path: `third_party/SteamAutoCrack/cli`
 License file: `third_party_licenses/steamautocrack.LICENSE`
 Bundled: Yes
@@ -64,7 +64,7 @@ Notes: gbe_fork Linux components remain owned by their original authors and are 
 
 ### gbe_fork tools / generate_emu_config
 
-Authors / maintainers: Detanup01, NickAntaris, Oureveryday, and related contributors
+Authors / maintainers: Detanup01, NickAntaris, and related contributors
 Path: `third_party/gbe_fork_tools/generate_emu_config`
 License file: `third_party_licenses/gbe_fork_tools.LICENSE`
 Bundled: Yes
@@ -74,7 +74,7 @@ Notes: These tools remain owned by their original authors and are not licensed a
 
 ### gbe_fork tools Linux
 
-Authors / maintainers: Detanup01, NickAntaris, Oureveryday, and related contributors
+Authors / maintainers: Detanup01, NickAntaris, and related contributors
 Path: `third_party/gbe_fork_tools_linux`
 License file: `third_party_licenses/gbe_fork_tools.LICENSE`
 Bundled: Yes
@@ -239,7 +239,7 @@ Notes: Hubcap Manifest remains owned/controlled by its maintainers. SteaMidra is
 
 ### ManifestHub
 
-Maintainer: oureveryday
+Maintainer: steamtoolsapp
 Type: External manifest archive/API
 Bundled: No
 Modified: No

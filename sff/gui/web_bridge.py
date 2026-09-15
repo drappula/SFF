@@ -70,7 +70,7 @@ from sff.gui.bridges.cloudsaves_bridge import (
 from sff.gui.bridges.download_bridge import (
     _bridge_apply_auto_update_default,
     _bridge_auto_update_was_registered,
-    _bridge_download_dlc_oureveryday,
+    _bridge_download_dlc_free,
     _bridge_download_game_ddmod,
     _bridge_download_game_fastest,
     _bridge_download_game_version,
@@ -1374,8 +1374,8 @@ class WebBridge(QObject):
         }))
 
     @pyqtSlot(str, str)
-    def download_dlc_oureveryday(self, dlc_appid, parent_appid):
-        return _bridge_download_dlc_oureveryday(self, dlc_appid, parent_appid)
+    def download_dlc_free(self, dlc_appid, parent_appid):
+        return _bridge_download_dlc_free(self, dlc_appid, parent_appid)
     @pyqtSlot(str, str, str, str)
     def download_game_version(self, app_id, manifest_override_json, source='freelua', build_id=''):
         return _bridge_download_game_version(self, app_id, manifest_override_json, source, build_id)

@@ -483,7 +483,7 @@ class ManifestDownloader:
             # CDN is dead on this path: no resolve_gmrc + CDN download here.
             logger.debug(f"Hubcap path for depot {depot_id}: all sources failed")
             return None
-        # oureveryday path ─────────────────────────────────────────────────────
+        # free-source path ─────────────────────────────────────────────────────
         # Step 1: The 3 GitHub raw mirror repos. Keyless and prompt-free, so
         #          they run before anything that can open a dialog. Each
         #          hosts the same k25FCdfEOoEJ42S6 manifest set.
@@ -498,7 +498,7 @@ class ManifestDownloader:
             if gh_result is not None:
                 return gh_result
         except Exception as e:
-            logger.debug("oureveryday github fallback failed: %s", e)
+            logger.debug("free-source github fallback failed: %s", e)
         mh_result = self._try_manifesthub(depot_id, manifest_id)
         if mh_result is not None:
             return mh_result
@@ -656,7 +656,7 @@ class ManifestDownloader:
                 if final_manifest_loc.exists():
                     sync_manifest_to_config_depotcache(self.steam_path, final_manifest_loc)
                     return (True, depot_id, manifest_id, final_manifest_loc, "Already exists")
-                # Steps 1-4 for oureveryday (silent), or full Morrenus chain
+                # Steps 1-4 for the free chain (silent), or full Morrenus chain
                 manifest = self.download_single_manifest(
                     depot_id, manifest_id, app_id=app_id
                 )

@@ -19,7 +19,7 @@
 # Best-effort post-save enrichment for HubCap and Ryuu .lua files. Some
 # DLCs ship as their own appid with no depots and just piggyback on the
 # parent game's manifest, so they need an addappid(<dlc_appid>) line in
-# the .lua to actually unlock. OurEveryday already does this inline; the
+# the .lua to actually unlock. The free-provider Lua builders already do this inline; the
 # helper here lets HubCap and Ryuu match that coverage without copying
 # the appinfo walk into their own modules.
 

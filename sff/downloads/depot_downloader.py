@@ -133,7 +133,7 @@ def _copy_manifests_to_temp(steam_path: Path, manifests: dict) -> None:
                 break
 
     # Also check the canonical staging folder (where ZIP-based providers
-    # like Hubcap / oureveryday / Ryuu drop manifests after extraction).
+    # like Hubcap / Free Providers / Ryuu drop manifests after extraction).
     # Path.cwd() was wrong on AppImage launches and Web UI workers.
     from sff.core.utils import manifests_staging_dir
     staging = manifests_staging_dir()
@@ -434,7 +434,7 @@ def run_download(
 
     # Auto-fill manifests from the staging dir for any selected depot
     # the caller did not pin a manifest for. The staging dir is what
-    # ZIP-based providers (Hubcap / oureveryday / Ryuu) drop manifests
+    # ZIP-based providers (Hubcap / Free Providers / Ryuu) drop manifests
     # into after extraction. Without this, DDMod gets called with
     # `-depot N` and no `-manifest N` and falls back to anonymous CDN
     # fetch, which 401s on most owned-game depots and aborts. The user

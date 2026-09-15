@@ -185,7 +185,7 @@
                     }
                     Components.showToast('info', 'Queueing ' + checkedIds.length + ' DLC(s) through Free Providers...');
                     checkedIds.forEach(function (id) {
-                        Bridge.call('download_dlc_oureveryday',
+                        Bridge.call('download_dlc_free',
                             String(id), String(_currentAppId));
                     });
                 };

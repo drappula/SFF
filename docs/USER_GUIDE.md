@@ -49,7 +49,7 @@ The main way to add a game. Goes through these steps:
 **1. Input**
 - Add a .lua file — manually pick a .lua file you have
 - Choose from saved .lua files — every file you process gets saved, find it here (useful for updates)
-- Automatically download a .lua file — download one from oureveryday or Hubcap Manifest
+- Automatically download a .lua file — download one from Free Providers or Hubcap Manifest
 
 **2. DLC Check**
 Runs the DLC check automatically (see Check DLC section below).
@@ -76,7 +76,7 @@ The Store tab lets you pick a specific game version (depot + manifest combinatio
 Browse the Store tab, find the game, and pick the version you want. SteaMidra fetches the available depot/manifest combinations from the source. If that list is empty, use the version picker’s Manual Depot / Manifest IDs box, or click Import HTML and choose saved SteamDB depot pages so SteaMidra lists their newest depot/manifest pairs for selection.
 
 **2. Lua download**
-SteaMidra automatically downloads the Lua file for the selected game (from Hubcap or OurEveryday, depending on your selection).
+SteaMidra automatically downloads the Lua file for the selected game (from Hubcap or Free Providers, depending on your selection).
 
 **3. Setup**
 Decryption keys are added to Steam's config.vdf. SLSSteam IDs are registered (Linux only). The Lua is saved to `saved_lua`.
