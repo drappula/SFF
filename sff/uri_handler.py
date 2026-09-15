@@ -69,7 +69,7 @@ class UriHandler:
         Uses HKCU so no admin rights needed.
         """
         if sys.platform != "win32":
-            logger.warning("URI protocol registration only supported on Windows")
+            logger.debug("URI protocol registration only supported on Windows")
             return False
         if not exe_path:
             exe_path = sys.executable
