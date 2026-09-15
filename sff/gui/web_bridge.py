@@ -405,6 +405,22 @@ def _warm_steam_session_worker():
         logger.debug("steam session prewarm failed: %r", e)
 
 
+def _warm_provider_cache_worker():
+    """Background worker: parse the big local depot-key DB and refresh the
+    free-provider key dump before the first download needs them, so the
+    first Free Providers add doesn't pay ~10s of startup-only work."""
+    try:
+        from sff.lua.provider import load_provider
+        load_provider()
+    except Exception as e:
+        logger.debug("provider cache prewarm failed: %r", e)
+    try:
+        from sff.lua.endpoints import _trionine_depotkeys
+        _trionine_depotkeys()
+    except Exception as e:
+        logger.debug("trionine keys prewarm failed: %r", e)
+
+
 def _lua_migration_known_names():
     """Names of config/lua files already handled (moved or dismissed)."""
     try:
@@ -598,6 +614,9 @@ class WebBridge(QObject):
         # first app-info / branch lookup never pays the anonymous login
         # cost on the GUI thread.
         QTimer.singleShot(8000, lambda: self._run_async(_warm_steam_session_worker))
+        # Parse the depot-key DB and pull the free-provider key dump off the
+        # GUI thread too, one beat later so they don't fight for CPU.
+        QTimer.singleShot(12000, lambda: self._run_async(_warm_provider_cache_worker))
         # Pending ACF edits (downgrade build IDs) — retried every 30s in
         # the background until Steam's ACF accepts the write.
         self._acf_queue_busy = False

@@ -20,6 +20,7 @@
 - **SLSsteam installs via Headcrab** - Linux SLSsteam installs run the h3adcr-b Headcrab script, which keeps the Steam client at a version the injection supports. The background update check won't install while Steam is running.
 - **Steam Updates tile on Linux** - the Home tab's block/unblock tile works on Linux too. Turning client auto-updates back on is one click, not a steam.cfg edit.
 - **Asks before closing Steam** - Linux Setup and the hash fix confirm before closing a running Steam client, so they never kill a game mid-session.
+- **Faster first download after opening SteaMidra** - Free Providers adds used to spend most of a minute re-parsing the bundled depot-key database and probing manifest mirrors one after another. The database is parsed once and warmed in the background at startup, mirrors are tried at the same time, and a Lua whose only problem is lost manifest files gets just those files re-seeded instead of a full refetch.
 
 ### Removed
 

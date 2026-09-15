@@ -189,18 +189,29 @@ def load_provider_file(path: Path) -> dict[str, dict]:
     return validate_provider_data(data)
 
 
+_provider_cache: dict[str, dict] | None = None
+
+
 def load_provider() -> dict[str, dict]:
-    merged: dict[str, dict] = {}
-    for path in provider_file_candidates():
-        if not path.exists():
-            continue
-        try:
-            data = load_provider_file(path)
-        except Exception as exc:
-            logger.warning("provider load failed for %s: %s", path, exc)
-            continue
-        merged.update(data)
-    return _strip_provider_metadata(merged)
+    # The bundled DB is 60+ MB / ~370k entries; parsing it costs 3-5s, and
+    # freelua used to pay that twice per download. Parse once per process,
+    # hand out shallow copies so callers that add entries (key updates)
+    # don't mutate the cache behind it. Callers must not edit the inner
+    # entry dicts. atomic_save_provider invalidates this after writes.
+    global _provider_cache
+    if _provider_cache is None:
+        merged: dict[str, dict] = {}
+        for path in provider_file_candidates():
+            if not path.exists():
+                continue
+            try:
+                data = load_provider_file(path)
+            except Exception as exc:
+                logger.warning("provider load failed for %s: %s", path, exc)
+                continue
+            merged.update(data)
+        _provider_cache = _strip_provider_metadata(merged)
+    return dict(_provider_cache)
 
 
 _PROVIDER_KEY_FIELDS = frozenset({"key"})
@@ -246,6 +257,10 @@ def atomic_save_provider(data: dict[str, dict], path: Path | None = None) -> Pat
             json.dump(cleaned, f, indent=2, ensure_ascii=False)
             f.write("\n")
         tmp_path.replace(path)
+        # The on-disk DB just changed; drop the parsed memo so the next
+        # load_provider() sees these keys.
+        global _provider_cache
+        _provider_cache = None
         return path
     finally:
         try:

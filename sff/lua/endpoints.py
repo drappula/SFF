@@ -22,6 +22,7 @@ import io
 import json
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import httpx
@@ -83,11 +84,24 @@ def _freelua_after_dead_key(dest, app_id, depotcache=None):
     return path
 
 
+_keydb_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="keydb")
+
+
 def _update_fallback_depotkeys(lua_bytes):
+    # Feeding new keys into the local 370k-entry DB costs several seconds
+    # (parse + atomic rewrite). The Lua is already on disk by the time this
+    # runs, so do it off the download thread; the single-worker pool keeps
+    # saves serialized and concurrent.futures joins it at process exit.
+    def _run():
+        try:
+            update_cache_from_lua_bytes(lua_bytes)
+        except Exception:
+            logger.debug("fallback key update failed", exc_info=True)
+
     try:
-        update_cache_from_lua_bytes(lua_bytes)
+        _keydb_pool.submit(_run)
     except Exception:
-        pass
+        _run()
 
 
 def _set_provider_key_flag(setting, dead):
@@ -519,6 +533,9 @@ def _seed_free_manifest(depot_id, gid, app_id, depotcache):
     # Pull the real .manifest bytes off the three keyless mirrors (first 200
     # wins) into depotcache + staging, so downloads and the depot file
     # explorer never need the GMRC cascade for these depots.
+    # The mirrors race in parallel: tried one after another, a slow or dead
+    # first mirror made every seed pay the full 20s timeout before the next
+    # host got a turn.
     urls = (
         f"https://raw.githubusercontent.com/{_TRIONINE_MANIFEST_REPO}/main/{depot_id}_{gid}.manifest",
         f"https://raw.githubusercontent.com/steamtoolsapp/ManifestHub/{app_id}/{depot_id}_{gid}.manifest",
@@ -534,19 +551,38 @@ def _seed_free_manifest(depot_id, gid, app_id, depotcache):
         pass
     if not targets:
         return
-    for url in urls:
+
+    def _fetch(url):
         try:
             resp = httpx.get(url, timeout=20, follow_redirects=True)
         except Exception:
-            continue
+            return None
         if resp.status_code == 200 and resp.content:
+            return resp.content
+        return None
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    pool = ThreadPoolExecutor(max_workers=len(urls), thread_name_prefix="seed")
+    try:
+        futures = [pool.submit(_fetch, url) for url in urls]
+        for fut in as_completed(futures):
+            try:
+                content = fut.result()
+            except Exception:
+                content = None
+            if not content:
+                continue
             for t in targets:
                 try:
                     t.parent.mkdir(parents=True, exist_ok=True)
-                    t.write_bytes(resp.content)
+                    t.write_bytes(content)
                 except Exception:
                     logger.debug("manifest seed write failed for %s", t, exc_info=True)
             return
+    finally:
+        # Don't block on losers still in their timeout window; cancelling
+        # stops the ones that have not started.
+        pool.shutdown(wait=False, cancel_futures=True)
 
 
 def _cached_lua_usable(lua_path: Path, depotcache) -> tuple[bool, str]:
@@ -567,11 +603,31 @@ def _cached_lua_usable(lua_path: Path, depotcache) -> tuple[bool, str]:
     if not has_keys:
         return False, "no depot keys"
     if depotcache is not None and pins:
-        missing = [f"{d}_{g}" for d, g in pins
+        missing = [(d, g) for d, g in pins
                    if not (Path(depotcache) / f"{d}_{g}.manifest").exists()]
         if missing:
-            return False, f"missing manifest {missing[0]}"
+            return False, f"missing manifest {missing[0][0]}_{missing[0][1]}"
     return True, ""
+
+
+def _lua_missing_pins(lua_path: Path, depotcache) -> list[tuple[str, str]]:
+    """Pins whose .manifest is absent while the Lua still has real keys.
+
+    The repair case: yesterday's run fetched the keys but lost the manifest
+    bytes. Re-seeding just those files beats refetching the whole Lua chain.
+    Empty when the Lua is unusable for any other reason (no keys, unreadable)
+    or nothing is missing."""
+    if depotcache is None:
+        return []
+    try:
+        text = lua_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    if not re.search(r'addappid\(\s*\d+\s*,\s*0\s*,', text):
+        return []
+    return [(d, g) for d, g in
+            re.findall(r'setManifestid\(\s*(\d+)\s*,\s*"?(\d+)"?\s*\)', text)
+            if not (Path(depotcache) / f"{d}_{g}.manifest").exists()]
 
 
 def get_freelua(dest, app_id, depotcache=None):
@@ -590,6 +646,18 @@ def get_freelua(dest, app_id, depotcache=None):
         if usable:
             print(Fore.GREEN + f"[Cached] Using existing Lua for {app_id}" + Style.RESET_ALL)
             return lua_path
+        repair = _lua_missing_pins(lua_path, depotcache)
+        if repair:
+            # Keys are fine, only manifest bytes are missing (interrupted
+            # or rate-limited run). Seed them and keep the Lua; refetching
+            # the whole chain costs ~a minute for a few hundred KB.
+            print(Fore.YELLOW + f"Seeding {len(repair)} missing manifest(s) for {app_id}..." + Style.RESET_ALL)
+            for d, g in repair:
+                _seed_free_manifest(d, g, app_id, depotcache)
+            if not _lua_missing_pins(lua_path, depotcache):
+                print(Fore.GREEN + f"[Cached] Using existing Lua for {app_id} (manifests reseeded)" + Style.RESET_ALL)
+                return lua_path
+            logger.debug("freelua %s: manifest repair incomplete, refetching lua", app_id)
         print(Fore.YELLOW + f"Cached Lua for {app_id} is incomplete ({reason}), refetching..." + Style.RESET_ALL)
         logger.debug("freelua %s: cached lua incomplete (%s), refetching", app_id, reason)
 
@@ -861,4 +929,14 @@ if __name__ == "__main__":
     finally:
         _httpx.get = _orig_get
     assert not POPUP_SHOWN  # falsy, like a failed download
+
+    # repair detection: keyed lua with missing pins is repairable,
+    # keyless lua never is
+    _one_pin = _tmp / "4.lua"
+    _one_pin.write_text('addappid(123)\naddappid(124,0,"ab")\nsetManifestid(124,"555")\n')
+    assert _lua_missing_pins(_one_pin, _dc) == [("124", "555")]
+    assert _lua_missing_pins(_keyless, _dc) == []
+    assert _lua_missing_pins(_one_pin, None) == []
+    (_dc / "124_555.manifest").write_bytes(b"x")
+    assert _lua_missing_pins(_one_pin, _dc) == []
     print("endpoints self-check OK")
