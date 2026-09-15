@@ -9,6 +9,10 @@
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
     background-color: var(--bg, #141414);
+    /* Photo themes define --bg-image; a user-uploaded photo goes to
+       --custom-bg and wins over it. All CSS, so the theme photo is there
+       on first paint and clearing a custom upload can't erase it. */
+    background-image: var(--custom-bg, var(--bg-image, none));
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;

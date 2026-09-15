@@ -26,6 +26,7 @@
 
 ### Fixed
 
+- **Photo themes stay put after restart** - the Dawn, Dusk, Flow, Lake, Midnight City and Snow backgrounds flashed for a moment at startup and then vanished. The photos now paint straight from CSS instead of a startup settings check that wiped them.
 - **Deleting a game clears its manifests** - removing a game with "delete files" now also drops its `.manifest` copies from depotcache and the staging folder. Previously a reinstall read the old manifest back, so a later update could be missed.
 - **Missing games get a real answer** - when the chosen source doesn't have a game, SteaMidra now says so and offers to fall back to Free Providers, instead of looping "enter a new API key" on a plain 404 (Ryuu) or failing quietly. If Free Providers don't have it either, a dialog points to the providers' Discords to request the game.
 - **Ryuu and DepotBox games download again** - Ryuu premium-key and DepotBox Lua files no longer arrive without their manifest files, so the game is complete when Steam starts pulling it instead of idling at zero.

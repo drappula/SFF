@@ -252,30 +252,12 @@ window.Settings = (function() {
     }
 
     function _applyTheme(themeId, persist) {
+        // Body background is pure CSS: photo themes define --bg-image and a
+        // custom upload defines --custom-bg on the root, which wins. No
+        // inline style to keep in sync or to wipe by accident.
         document.documentElement.setAttribute('data-theme', themeId);
         localStorage.setItem('theme', themeId);
         if (persist !== false) Bridge.call('set_setting', 'theme', themeId);
-        var _photoMap = {
-            'dawn': 'img/themes/dawn.jpg',
-            'dusk': 'img/themes/dusk.jpg',
-            'flow': 'img/themes/flow.jpg',
-            'lake': 'img/themes/lake.jpg',
-            'midnight-city': 'img/themes/midnightcity.jpg',
-            'snow': 'img/themes/snow.jpg'
-        };
-        var _bgImg = _photoMap[themeId] ? 'url(' + _photoMap[themeId] + ')' : '';
-        document.body.style.backgroundImage = _bgImg;
-        document.body.style.backgroundSize = _bgImg ? 'cover' : '';
-        document.body.style.backgroundPosition = _bgImg ? 'center' : '';
-        Bridge.callWithCallback('get_setting', 'custom_background_image', function(bgPath) {
-            if (bgPath) {
-                Bridge.callWithCallback('get_setting', 'custom_accent_color', function(accent) {
-                    if (window.App && App.applyCustomAppearance) {
-                        App.applyCustomAppearance(bgPath, accent || '');
-                    }
-                });
-            }
-        });
     }
 
     function _initPathControls() {
@@ -777,8 +759,9 @@ window.Settings = (function() {
                         return;
                     }
                     if (bgInput) bgInput.value = '';
-                    var themeId = document.documentElement.getAttribute('data-theme') || 'dark';
-                    _applyTheme(themeId);
+                    if (window.App && App.clearCustomAppearance) {
+                        App.clearCustomAppearance(true);
+                    }
                     Components.showToast('success', 'Background cleared');
                 });
             });

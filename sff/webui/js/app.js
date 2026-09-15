@@ -26,9 +26,7 @@ window.App = (function() {
     function applyCustomAppearance(backgroundPath, accentColor) {
         if (backgroundPath) {
             var url = _pathToFileUrl(backgroundPath) + '?t=' + Date.now();
-            document.body.style.backgroundImage = 'url("' + url + '")';
-            document.body.style.backgroundSize = 'cover';
-            document.body.style.backgroundPosition = 'center';
+            document.documentElement.style.setProperty('--custom-bg', 'url("' + url + '")');
         } else {
             clearCustomAppearance(true);
         }
@@ -39,9 +37,9 @@ window.App = (function() {
     }
 
     function clearCustomAppearance(backgroundOnly) {
-        document.body.style.backgroundImage = '';
-        document.body.style.backgroundSize = '';
-        document.body.style.backgroundPosition = '';
+        // Only the custom upload slot; the theme photo lives in --bg-image
+        // and must survive this.
+        document.documentElement.style.removeProperty('--custom-bg');
         if (!backgroundOnly) {
             document.documentElement.style.removeProperty('--accent');
             document.documentElement.style.removeProperty('--sidebar-active');
@@ -141,18 +139,6 @@ window.App = (function() {
                 if (themeId) {
                     document.documentElement.setAttribute('data-theme', themeId);
                     localStorage.setItem('theme', themeId);
-                    var _photoMap = {
-                        'dawn': 'img/themes/dawn.jpg',
-                        'dusk': 'img/themes/dusk.jpg',
-                        'flow': 'img/themes/flow.jpg',
-                        'lake': 'img/themes/lake.jpg',
-                        'midnight-city': 'img/themes/midnightcity.jpg',
-                        'snow': 'img/themes/snow.jpg'
-                    };
-                    var _bgImg = _photoMap[themeId] ? 'url(' + _photoMap[themeId] + ')' : '';
-                    document.body.style.backgroundImage = _bgImg;
-                    document.body.style.backgroundSize = _bgImg ? 'cover' : '';
-                    document.body.style.backgroundPosition = _bgImg ? 'center' : '';
                 }
                 _loadCustomAppearance(py);
             });
