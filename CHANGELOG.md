@@ -1,26 +1,27 @@
 # Changelog
 
-## Unreleased
+## 6.8.0
 
 ### New
 
-- **Dead provider keys** - Hubcap, Ryuu and DepotBox keys are checked a few seconds after launch and whenever a download uses them. A rejected key shows a dialog offering the provider's site, and that provider stops auto-selecting in download pickers and falls back to Free Providers until a working key is saved.
-- **Offer to restart Steam after pattern prewarm** - when startup fills the LumaCore pattern cache for a new Steam build while the warning banner was showing, SteaMidra now asks whether to restart Steam right away so it loads the patterns.
-- **Games no longer auto-update by default** - on Windows, SteaMidra now installs the manifest-pin helper at startup, so added games stay on their pinned version instead of Steam updating them. Removing the helper in Auto Update Games is respected across restarts. Steam's config and depotcache folders are also created up front.
-- **Store loads without a spinner** - the Store's first page is fetched in the background at startup and results are kept when you switch tabs, so opening the Store or returning to it shows your last search instead of a loading screen.
+- **Dead provider keys** - Hubcap, Ryuu and DepotBox keys are checked shortly after launch and whenever a download uses them. A rejected key shows a dialog with the provider's site, and that provider stops auto-selecting and falls back to Free Providers until a working key is saved.
+- **Offer to restart Steam after pattern prewarm** - when startup fills the LumaCore pattern cache for a new Steam build while the support-data banner is up, SteaMidra offers to restart Steam so it loads the patterns.
+- **Games no longer auto-update by default** - on Windows, SteaMidra installs the manifest-pin helper at startup, so added games stay on their pinned version. Removing the helper in Auto Update Games is respected across restarts.
+- **Store opens instantly** - the first Store page is fetched in the background at startup and kept when you switch tabs, so the Store shows your last search instead of a loading screen.
 
 ### Changed
 
-- **Faster Windows installer builds** - the Setup.exe now compresses with zlib instead of solid LZMA. Builds take about seven minutes less; the installer is 150 MB larger. The portable zip is unchanged. CI also caches the Python venv between runs.
-- **Store search is several times faster** - typing a search no longer re-cleans every one of the ~200k game names per query. Results are identical.
-- **Manifest sources prefer free mirrors** - the public GMRC mirrors (steam.run, wudrm, opensteamtool) are gone; they now answer 403/404 everywhere. Manifest fetches try the GitHub manifest mirrors before ManifestHub, so the API-key prompt no longer interrupts a download that a free source can finish.
+- **Faster Windows installer builds** - Setup.exe compresses with zlib instead of solid LZMA. Builds take about seven minutes less; the installer is 150 MB larger.
+- **Store search is several times faster** - typing a search no longer re-cleans all ~200k game names per query. Results are identical.
+- **Manifest sources prefer free mirrors** - the public GMRC mirrors (steam.run, wudrm, opensteamtool) are gone; they now answer 403/404 everywhere. Manifest fetches try the GitHub mirrors before ManifestHub, so the API-key prompt no longer interrupts a download a free source can finish.
 - **Download speed limit** - Settings has a "Download Speed Limit (MB/s, 0 = no limit)" box that caps the built-in downloader's wire rate across all chunks and parallel depot downloads. Does not apply to Steam/LumaCore downloads or DepotDownloaderMod.
-- **Ryuu key hints** - Ryuu links now open generator.ryuu.lol/api, and the key dialog and Settings tooltip say to log in first: the key shows up as "auth_key" only after signing in.
-- **Old provider handle retired from the codebase** - Oureveryday/MidraEveryDay no longer appear in UI strings, code comments, docs, or third-party credits; the Free Providers label is used everywhere, and tool credits point at their canonical projects. Internal names like the DLC download bridge slot changed with it.
+- **Ryuu key hints** - Ryuu links open generator.ryuu.lol/api, and the key dialog and Settings tooltip say to log in first: the key shows up as "auth_key" only after signing in.
+- **Old provider handle retired** - Oureveryday/MidraEveryDay no longer appear in UI strings, code comments, docs, or credits. Free Providers is the label everywhere, and tool credits point at their canonical projects.
 - **SLSsteam installs via Headcrab** - Linux SLSsteam installs run the h3adcr-b Headcrab script, which keeps the Steam client at a version the injection supports. The background update check won't install while Steam is running.
 - **Steam Updates tile on Linux** - the Home tab's block/unblock tile works on Linux too. Turning client auto-updates back on is one click, not a steam.cfg edit.
 - **Asks before closing Steam** - Linux Setup and the hash fix confirm before closing a running Steam client, so they never kill a game mid-session.
-- **Faster first download after opening SteaMidra** - Free Providers adds used to spend most of a minute re-parsing the bundled depot-key database and probing manifest mirrors one after another. The database is parsed once and warmed in the background at startup, mirrors are tried at the same time, and a Lua whose only problem is lost manifest files gets just those files re-seeded instead of a full refetch.
+- **Quiet Linux startup** - SteaMidra no longer warns about URI protocol registration on Linux. The note still lands in debug.log.
+- **Faster first download after opening SteaMidra** - Free Providers adds spent most of a minute re-parsing the bundled depot-key database and probing manifest mirrors one at a time. The database is parsed once and warmed in the background at startup, mirrors are tried at the same time, and a Lua with only lost manifest files gets just those files re-seeded instead of a full refetch.
 
 ### Removed
 
@@ -28,20 +29,20 @@
 
 ### Fixed
 
-- **Photo themes stay put after restart** - the Dawn, Dusk, Flow, Lake, Midnight City and Snow backgrounds flashed for a moment at startup and then vanished. The photos now paint straight from CSS instead of a startup settings check that wiped them.
-- **Deleting a game clears its manifests** - removing a game with "delete files" now also drops its `.manifest` copies from depotcache and the staging folder. Previously a reinstall read the old manifest back, so a later update could be missed.
-- **Missing games get a real answer** - when the chosen source doesn't have a game, SteaMidra now says so and offers to fall back to Free Providers, instead of looping "enter a new API key" on a plain 404 (Ryuu) or failing quietly. If Free Providers don't have it either, a dialog points to the providers' Discords to request the game.
-- **Ryuu and DepotBox games download again** - Ryuu premium-key and DepotBox Lua files no longer arrive without their manifest files, so the game is complete when Steam starts pulling it instead of idling at zero.
-- **Retrying a game after lost manifests** - a download interrupted by provider rate limits left a partial Lua behind, and every retry reused it: the depot came up keyless, the game appeared added, and nothing downloaded. Free Providers now check that the cached Lua has real keys and its manifests are on disk, and refetch when either is missing.
+- **Photo themes stay put after restart** - the Dawn, Dusk, Flow, Lake, Midnight City and Snow backgrounds flashed for a moment at startup and then vanished.
+- **Deleting a game clears its manifests** - removing a game with "delete files" now also drops its `.manifest` copies from depotcache and the staging folder, so a reinstall can't resurrect the old pin.
+- **Missing games get a real answer** - when the chosen source doesn't have a game, SteaMidra says so and offers to fall back to Free Providers, instead of looping "enter a new API key" on a plain 404 or failing quietly. If Free Providers don't have it either, a dialog points to the providers' Discords to request the game.
+- **Ryuu and DepotBox games download again** - Lua files from Ryuu premium keys and DepotBox no longer arrive without their manifest files, so Steam starts pulling files instead of idling at zero.
+- **Retrying a game after lost manifests** - a download interrupted by provider rate limits left a partial Lua behind, and every retry reused it: the game appeared added and nothing downloaded. Cached Free Providers Lua files are now checked for real keys and on-disk manifests, and refetched when either is missing.
 - **Windows downloads use LumaCore again** - 6.6.7d switched Windows to the built-in downloader. Windows now registers the game and hands the files to Steam/LumaCore. If registration fails, usually because Steam holds the files locked, the download says so instead of claiming the game is in your library.
-- **Downloads stalling on "Parsing Lua..."** - the check for whether a game is already registered re-scanned the whole Steam plug-in folder and the full game list to answer one yes-or-no question; it now reads that game's file directly.
+- **Downloads stalling on "Parsing Lua..."** - the check for whether a game is already registered re-scanned the whole plug-in folder and game list to answer one yes-or-no question; it now reads that game's file directly.
 - **Warns when Steam won't close** - download setup logs a warning if the kill leaves Steam running; the locked config writes that follow used to fail silently.
-- **"No cached LumaCore support data" on new Steam builds** - the pattern cache prewarm could fail to find patterns that existed, leaving the banner up. Launching SteaMidra after a Steam update now fills the cache again, and the banner clears right away once it confirms the current build's patterns are all in place.
-- **Ryuu downloads for games without a public branch** - the premium API route always asked for branch "public", which Ryuu answers 404 for on most games. It now requests the branch only when one is picked; downloads work out of the box.
+- **"No cached LumaCore support data" on new Steam builds** - the pattern cache prewarm could fail to find patterns that existed. Launching SteaMidra after a Steam update fills the cache again, and the banner clears once it confirms the current build's patterns are in place.
+- **Ryuu downloads for games without a public branch** - the premium API route always asked for branch "public", which Ryuu answers 404 for on most games. It now requests a branch only when one is picked.
 - **Recently Updated stuck at old dates** - the Store list now sorts and labels by Steam's last-modified stamp.
-- **Store loading placeholder** - while a page loads, the Store now shows placeholder cards shaped like the real grid (or rows in list view) instead of a strip of thin bars.
-- **Startup tray message fixed** - the balloon SteaMidra shows when it starts no longer says the app is running in the system tray while its window is clearly open. It now reads "Icon added to the system tray. Right-click it for the menu."
-- **Enter no longer clears the log window** - pressing Enter in the log viewer did nothing useful because the Clear button swallowed it as the dialog default; it is gone.
+- **Store loading placeholder** - while a page loads, the Store shows placeholder cards shaped like the real grid instead of a strip of thin bars.
+- **Startup tray message fixed** - the balloon SteaMidra shows when it starts claimed the app was running in the system tray while its window was clearly open. It now reads "Icon added to the system tray. Right-click it for the menu."
+- **Enter no longer clears the log window** - pressing Enter in the log viewer cleared it, because the Clear button swallowed the key as the dialog default. That default is gone.
 - **Saved badge no longer covers buttons** - the "✓ Saved" marker on stored API keys sat on top of the neighboring Save/Test buttons instead of the input field.
 
 ## 6.6.7d
