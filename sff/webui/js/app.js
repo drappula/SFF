@@ -1595,7 +1595,7 @@ window.App = (function() {
                     return _osNames[k] || k.charAt(0).toUpperCase() + k.slice(1);
                 })
                 .join(', ');
-            var label = d.name || (gameName ? gameName + (os ? ' - ' + os : '') : 'Depot ' + d.id);
+            var label = d.name ? d.name + ' (' + d.id + ')' : 'Depot ' + d.id;
             var size = d.size ? Components.fmtBytes(d.size) : '&mdash;';
             var selFiles = (_depotCustomSelFiles[String(pickerAppId)] || {})[d.id];
             var nSel = selFiles ? selFiles.length : 0;

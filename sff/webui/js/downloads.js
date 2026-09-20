@@ -71,7 +71,11 @@ window.Downloads = (function() {
                 if (data.name) it.name = data.name;
                 if (data.status) it.statusText = data.status;
                 if (typeof data.progress === 'number' && data.progress >= 0) {
-                    it.progress = data.progress;
+                    if (data.progress < it.progress && it.status === 'downloading' && it.progress < 100) {
+                        // Drop backward progress within same download (depot switch glitch where next depot briefly reports 0)
+                    } else {
+                        it.progress = data.progress;
+                    }
                 }
                 if (it.status === 'queued' || it.status === 'failed') {
                     it.status = 'downloading';

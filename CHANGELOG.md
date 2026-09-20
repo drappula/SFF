@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Depot picker showed the game name for every depot** — unnamed depots fell back to the game name plus OS, so all rows looked identical. Unnamed depots now show `Depot <id>`, named depots show `Name (<id>)`.
+- **Assassin's Creed and other old depots failed on the built-in downloader** — those depots store chunks as ZIP (`PK\x03\x04`), but the chunk handler only accepted `VZa`/`VSZa` and dropped the chunk. ZIP chunks now unzip and verify correctly.
+- **Depot file list required a Hubcap key** — the explorer only tried Hubcap on-demand when no local manifest was cached, so users without a Hubcap key always hit the "start a download first" error. It now tries LuasTools and the GitHub mirrors first, then Hubcap as fallback.
+- **Progress bar flickered to 0 on depot switch** — switching depots could briefly report `0` before the correct depot offset, making the bar dip then jump. Overall progress is now monotonic and never moves backwards within one download.
+
+### Changed
+
+- **Manifests prefer LuasTools** — `https://manifest.luastools.xyz/m/<depot>/<manifest>` is now first for game and workshop manifest fetches, before GitHub and ManifestHub. Workshop adds use the same path.
+- **Expired-key dialog can now remove the key** — the Hubcap/Ryuu/DepotBox invalid-key popup has a red `Remove Key` button that clears the saved key and its rejected flag so the provider falls back to Free Providers.
+
+### Improved
+
+- **Lower idle RAM** — Store metadata (`games.json`) and the 369k-entry depot-key database no longer preload at startup. Store data loads on first Store search, depot keys on first Free Providers download. Idle drops from ~1 GB to ~650 MB; the depot-key cache also stores plain key strings instead of per-entry dicts.
+
 ## 6.8.0
 
 ### New

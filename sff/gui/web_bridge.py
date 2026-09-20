@@ -614,9 +614,11 @@ class WebBridge(QObject):
         # first app-info / branch lookup never pays the anonymous login
         # cost on the GUI thread.
         QTimer.singleShot(8000, lambda: self._run_async(_warm_steam_session_worker))
-        # Parse the depot-key DB and pull the free-provider key dump off the
-        # GUI thread too, one beat later so they don't fight for CPU.
-        QTimer.singleShot(12000, lambda: self._run_async(_warm_provider_cache_worker))
+        # RAM: provider DB is 64 MB on disk → 120 MB in RAM for 369k keys.
+        # The eager 12s warm cost 120 MB idle for Home-only users who never
+        # use Free Providers. Defer until first Free Providers download;
+        # the download path already calls load_provider() on demand.
+        # QTimer.singleShot(12000, lambda: self._run_async(_warm_provider_cache_worker))  # deferred
         # Pending ACF edits (downgrade build IDs) — retried every 30s in
         # the background until Steam's ACF accepts the write.
         self._acf_queue_busy = False
@@ -659,9 +661,11 @@ class WebBridge(QObject):
         self._store_search_in_flight = False
         self._pending_store_search = None
 
-        # Preload disk-cached fallback data after the first frame.  Parsing
-        # games.json can involve tens of MB, so it belongs on a worker too.
-        self._preload_all_store_data()
+        # RAM: store metadata (games.json 47 MB -> ~190 MB RAM) is now
+        # loaded lazily on first Store search, not at startup. The eager
+        # preload cost 200 MB idle for users who never open Store; the
+        # Store's search path already calls ensure_loaded() on demand.
+        # self._preload_all_store_data()  # deferred
 
     def _ensure_steam_dirs_and_update_lock(self):
         """Create Steam/config/stplug-in + Steam/depotcache, and make the
@@ -1065,12 +1069,13 @@ class WebBridge(QObject):
         self._run_async(_do, on_done=_done, on_error=lambda e: None)
 
     def _warn_provider_key_dead(self, names):
-        """Dialog: 'your <provider> key no longer works' + Open site / Ignore.
+        """Dialog: 'your <provider> key no longer works' + Open site / Ignore / Remove Key.
 
         Called on the GUI thread from the startup validator's completion.
         Deliberately does NOT disable the providers: a user who clicks
         Ignore should keep the client until the per-query fallbacks kick
-        in on their own.
+        in on their own. Remove Key is dangerous (red) and wipes the
+        saved key so the provider falls back to Free Providers.
         """
         try:
             from PyQt6.QtWidgets import QMessageBox
@@ -1095,10 +1100,40 @@ class WebBridge(QObject):
                 )
                 btn_site = dlg.addButton(
                     f"Open {name} site", QMessageBox.ButtonRole.ActionRole)
+                btn_remove = dlg.addButton(
+                    "Remove Key", QMessageBox.ButtonRole.DestructiveRole)
+                try:
+                    btn_remove.setStyleSheet(
+                        "QPushButton { background-color: #c0392b; color: white; font-weight: bold; }"
+                        " QPushButton:hover { background-color: #a93226; }"
+                    )
+                except Exception:
+                    pass
                 dlg.addButton("Ignore", QMessageBox.ButtonRole.RejectRole)
                 dlg.exec()
-                if dlg.clickedButton() is btn_site:
+                clicked = dlg.clickedButton()
+                if clicked is btn_site:
                     QDesktopServices.openUrl(QUrl(_PROVIDER_KEY_SITES[name]))
+                elif clicked is btn_remove:
+                    try:
+                        from sff.core.storage.settings import clear_setting
+                        from sff.core.structs import Settings
+                        if name == "Hubcap":
+                            clear_setting(Settings.HUBCAP_KEY)
+                            clear_setting(Settings.HUBCAP_KEY_DEAD)
+                            self._api_key = None
+                            self._store_client = None
+                            self._hubcap_unavailable = True
+                        elif name == "Ryuu":
+                            clear_setting(Settings.RYUU_KEY)
+                            clear_setting(Settings.RYUU_API_KEY)
+                            clear_setting(Settings.RYUU_KEY_DEAD)
+                        elif name == "DepotBox":
+                            clear_setting(Settings.DEPOTBOX_KEY)
+                            clear_setting(Settings.DEPOTBOX_KEY_DEAD)
+                        logger.info("provider key removed via dead-key dialog: %s", name)
+                    except Exception:
+                        logger.debug("failed to remove %s key", name, exc_info=True)
         except Exception:
             logger.debug("provider dead-key dialog failed", exc_info=True)
 

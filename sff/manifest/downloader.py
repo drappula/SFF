@@ -51,6 +51,8 @@ from sff.core.structs import (  # type: ignore
 )
 from sff.zip import read_nth_file_from_zip_bytes, extract_manifests_from_zip_bytes
 
+_LUASTOOLS_MANIFEST_URL = "https://manifest.luastools.xyz/m/{depot_id}/{manifest_id}"
+
 _GITHUB_MANIFEST_REPOS = (
     ("qwe213312/k25FCdfEOoEJ42S6", "qwe213312"),
     ("mejikuhibiniu1/k25FCdfEOoEJ42S6", "mejikuhibiniu1"),
@@ -425,6 +427,25 @@ class ManifestDownloader:
                 logger.debug(f"GitHub mirror ({label}) fetch failed for depot {depot_id}: {e}")
         return None
 
+    def _try_luastools(self, depot_id, manifest_id):
+        url = _LUASTOOLS_MANIFEST_URL.format(depot_id=depot_id, manifest_id=manifest_id)
+        try:
+            resp = httpx.get(url, timeout=30, follow_redirects=True)
+            if resp.status_code == 200 and resp.content:
+                print(
+                    Fore.GREEN
+                    + f"[OK] LuasTools: got manifest for depot {depot_id}"
+                    + Style.RESET_ALL
+                )
+                return resp.content
+            if resp.status_code == 404:
+                logger.debug(f"LuasTools: depot {depot_id} manifest {manifest_id} not found")
+            else:
+                logger.debug(f"LuasTools returned HTTP {resp.status_code}: {resp.text[:200]}")
+        except Exception as e:
+            logger.debug(f"LuasTools request failed: {e}")
+        return None
+
     def _try_manifesthub(self, depot_id, manifest_id):
         # Hits the ManifestHub API; key is auto-fetched and renewed as needed.
         api_key = get_manifesthub_api_key()
@@ -465,6 +486,13 @@ class ManifestDownloader:
         cdn_client = None,
         app_id = "",
     ):
+        # LuasTools mirror is first-priority for both game and workshop manifests.
+        try:
+            lt_result = self._try_luastools(depot_id, manifest_id)
+            if lt_result is not None:
+                return lt_result
+        except Exception as e:
+            logger.debug("luastools fallback failed: %s", e)
         if self.use_hubcap:
             # Hubcap path: Hubcap → GitHub mirrors → ManifestHub API.
             # Free sources before the one that can open a key dialog.
@@ -508,15 +536,17 @@ class ManifestDownloader:
         manifest = self.download_single_manifest(app_id, ugc_id)
         if manifest:
             extracted = read_nth_file_from_zip_bytes(0, manifest)
-            if not extracted:
-                raise Exception("File isn't a ZIP. This shouldn't happen.")
             depotcache = self.steam_path / "depotcache"
             depotcache.mkdir(exist_ok=True)
             final_manifest_loc = (
                 depotcache / f"{app_id}_{ugc_id}.manifest"
             )
-            with final_manifest_loc.open("wb") as f:
-                f.write(extracted.read())
+            if extracted:
+                with final_manifest_loc.open("wb") as f:
+                    f.write(extracted.read())
+            else:
+                # LuasTools / ManifestHub / GitHub return raw manifest bytes, not ZIP-wrapped
+                final_manifest_loc.write_bytes(manifest)
 
     def download_manifests(
         self, lua: LuaParsedInfo, decrypt: bool = False, auto_manifest: bool = False,

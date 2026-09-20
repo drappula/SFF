@@ -1055,6 +1055,7 @@ def _make_run_download_print_fn(bridge, app_id, game_name, selected_depots,
     _seen = []
     _last_emit = [0.0]
     _last_pct = [-1.0]
+    _last_overall = [floor]
 
     def _base(dep):
         # Cumulative size of depots started before this one, as a fraction
@@ -1070,9 +1071,18 @@ def _make_run_download_print_fn(bridge, app_id, game_name, selected_depots,
         return _span / n
 
     def _emit(status, pct):
+        pct_int = max(0, min(100, int(pct)))
+        # Never go backwards within same download (depot switch glitch where
+        # next depot briefly reports 0). Keep monotonic overall progress.
+        if pct_int < _last_overall[0] and _last_overall[0] > floor and pct_int == 0:
+            logger.debug("suppressed backward progress %s -> %s for %s", _last_overall[0], pct_int, status[:60])
+            return
+        if pct_int < _last_overall[0]:
+            pct_int = _last_overall[0]
+        _last_overall[0] = pct_int
         bridge.download_progress.emit(json.dumps({
             "app_id": app_id, "name": game_name,
-            "status": status, "progress": max(0, min(100, int(pct))),
+            "status": status, "progress": pct_int,
         }))
 
     def _print_fn(msg):
@@ -1984,20 +1994,30 @@ def _bridge_fetch_depot_filetree(bridge, app_id, depot_id, lua_path=''):
             except Exception:
                 logger.debug("filetree local manifest read failed", exc_info=True)
 
-        # Nothing cached locally: one bounded, NON-interactive fetch.
-        # Hubcap on-demand generates the exact manifest file with the key
-        # the user already saved. download_single_manifest is deliberately
-        # not used here - its ManifestHub step prompts for a key and a
-        # dialog fired from a worker thread is invisible behind this modal,
-        # which is what made the explorer appear to hang forever.
+        # Nothing cached locally: try free providers first (no prompt,
+        # no key), then Hubcap on-demand if a key is saved. download_single
+        # _manifest is deliberately not used - its ManifestHub step prompts
+        # for a key and a dialog fired from a worker thread is invisible
+        # behind this modal, which made the explorer appear to hang forever.
         if not raw and md is not None:
             try:
-                if (_gs(_St.HUBCAP_KEY) or "").strip():
-                    _step("no local copy, trying Hubcap on-demand...")
-                    raw = md._try_hubcap_generate(did, gid)
-                    _step("Hubcap on-demand: %s" % ("got %d bytes" % len(raw) if raw else "no result"))
+                _step("no local copy, trying free providers (LuasTools/GitHub)...")
+                raw = md._try_luastools(did, gid)
+                if raw:
+                    _step("LuasTools: got %d bytes" % len(raw))
+                else:
+                    raw = md._try_github_manifest_bytes(aid, did, gid)
+                    _step("GitHub mirror: %s" % ("got %d bytes" % len(raw) if raw else "no result"))
             except Exception:
-                logger.debug("filetree hubcap on-demand failed", exc_info=True)
+                logger.debug("filetree free-provider fetch failed", exc_info=True)
+            if not raw:
+                try:
+                    if (_gs(_St.HUBCAP_KEY) or "").strip():
+                        _step("free providers missed, trying Hubcap on-demand...")
+                        raw = md._try_hubcap_generate(did, gid)
+                        _step("Hubcap on-demand: %s" % ("got %d bytes" % len(raw) if raw else "no result"))
+                except Exception:
+                    logger.debug("filetree hubcap on-demand failed", exc_info=True)
         if raw and steam_path:
             # Cache it so the next open is instant and a later download
             # finds the same manifest instead of refetching.

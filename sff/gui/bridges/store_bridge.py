@@ -579,8 +579,9 @@ def _load_steam_applist():
                 _f.write("\n".join(_gs))
         except Exception:
             pass
-        for _a in _result:
-            _a["norm"] = _normalize_for_search(_a.get("name", ""))
+        # RAM: norm was precomputed for all 200k entries (~35 MB + CPU)
+        # but _search_steam_catalog already computes it lazily on the
+        # few hundred prefilter hits. Drop eager pass, save RAM.
         _STEAM_APPLIST_CACHE = _result
         _STEAM_APPLIST_CACHE_TIME = _now
         _result.sort(key=lambda x: x.get('appid', 0))

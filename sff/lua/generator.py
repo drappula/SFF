@@ -57,16 +57,34 @@ def _depot_from_any(item, manifests: dict | None = None, provider: dict | None =
     if isinstance(item, LuaDepot):
         return item
     _prov = provider if provider is not None else {}
+
+    def _ekey(e):
+        if isinstance(e, str):
+            return e
+        if isinstance(e, dict):
+            return str(e.get("key") or "")
+        return ""
+
+    def _ename(e):
+        if isinstance(e, dict):
+            return str(e.get("name") or "")
+        return ""
+
+    def _eparent(e, field):
+        if isinstance(e, dict):
+            return str(e.get(field) or "")
+        return ""
+
     if isinstance(item, dict):
         depot_id = str(item.get("depot_id") or item.get("id") or "")
         key = str(item.get("key") or item.get("decryption_key") or "")
         entry = _prov.get(depot_id) or get_entry(depot_id)
         return LuaDepot(
             depot_id=depot_id,
-            key=key or str(entry.get("key") or ""),
-            name=str(item.get("name") or entry.get("name") or f"Depot {depot_id}"),
-            parent_appid=str(item.get("parent_appid") or entry.get("parent_appid") or ""),
-            parent_name=str(item.get("parent_name") or entry.get("parent_name") or ""),
+            key=key or _ekey(entry),
+            name=str(item.get("name") or _ename(entry) or f"Depot {depot_id}"),
+            parent_appid=str(item.get("parent_appid") or _eparent(entry, "parent_appid") or ""),
+            parent_name=str(item.get("parent_name") or _eparent(entry, "parent_name") or ""),
             manifest_id=str(item.get("manifest_id") or (manifests or {}).get(depot_id) or ""),
             manifest_size=int(item.get("manifest_size") or 0),
         )
@@ -75,10 +93,10 @@ def _depot_from_any(item, manifests: dict | None = None, provider: dict | None =
     entry = _prov.get(depot_id) or get_entry(depot_id)
     return LuaDepot(
         depot_id=depot_id,
-        key=key or str(entry.get("key") or ""),
-        name=str(entry.get("name") or f"Depot {depot_id}"),
-        parent_appid=str(entry.get("parent_appid") or ""),
-        parent_name=str(entry.get("parent_name") or ""),
+        key=key or _ekey(entry),
+        name=str(_ename(entry) or f"Depot {depot_id}"),
+        parent_appid=str(_eparent(entry, "parent_appid") or ""),
+        parent_name=str(_eparent(entry, "parent_name") or ""),
         manifest_id=str((manifests or {}).get(depot_id) or ""),
         manifest_size=int(getattr(item, "manifest_size", 0) or 0),
     )
@@ -115,8 +133,11 @@ def render_grouped_lua(
             main_depots.append(depot)
 
     lines: list[str] = ["-- MAIN APPLICATION"]
-    base_entry = provider.get(app_id_str, {})
-    base_key = str(base_entry.get("key") or "")
+    base_entry = provider.get(app_id_str, "")
+    if isinstance(base_entry, dict):
+        base_key = str(base_entry.get("key") or "")
+    else:
+        base_key = str(base_entry or "")
     if base_key and is_valid_key(base_key):
         lines.append(_line_with_comment(
             f'addappid({app_id_str}, 1, "{base_key.lower()}")',

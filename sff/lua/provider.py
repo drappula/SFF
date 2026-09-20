@@ -217,32 +217,40 @@ def load_provider() -> dict[str, dict]:
 _PROVIDER_KEY_FIELDS = frozenset({"key"})
 
 
-def _strip_provider_metadata(data: dict[str, dict]) -> dict[str, dict]:
-    """Drop non-essential fields from provider entries to save RAM.
-    Each entry normally has ~5 keys (key, name, kind, parent_appid, parent_name).
-    After stripping, only the 'key' field is kept per entry, saving ~80% memory
-    for the 364K-entry provider dict.
+def _strip_provider_metadata(data: dict[str, dict]) -> dict[str, str]:
+    """Drop non-essential fields and collapse dict wrapper to save RAM.
+
+    Each entry normally has ~5 keys (key, name, kind, parent_appid,
+    parent_name) wrapped as {"key": "hex"}. Collapsing to plain
+    {"id": "hex"} saves one dict object per entry (~56 B * 369k ≈ 20 MB)
+    plus the per-entry key string. After stripping, only the hex string is
+    kept per entry, saving ~80% vs rich form and ~15% vs slim dict.
     """
-    stripped: dict[str, dict] = {}
+    stripped: dict[str, str] = {}
     for appid, entry in data.items():
         if isinstance(entry, dict):
-            slim = {k: v for k, v in entry.items() if k in _PROVIDER_KEY_FIELDS}
-            stripped[appid] = slim
-        else:
-            stripped[appid] = entry
+            k = entry.get("key") or ""
+            if k:
+                stripped[appid] = str(k).lower()
+        elif isinstance(entry, str) and entry:
+            stripped[appid] = str(entry).lower()
     return stripped
 
 
 def get_key(item_id: str) -> str:
     entry = load_provider().get(str(item_id))
-    if not isinstance(entry, dict):
-        return ""
-    key = str(entry.get("key") or "")
-    return key if is_valid_key(key) else ""
+    if isinstance(entry, str):
+        return entry if is_valid_key(entry) else ""
+    if isinstance(entry, dict):
+        key = str(entry.get("key") or "")
+        return key if is_valid_key(key) else ""
+    return ""
 
 
 def get_entry(item_id: str) -> dict:
     entry = load_provider().get(str(item_id))
+    if isinstance(entry, str):
+        return {"key": entry} if entry else {}
     return dict(entry) if isinstance(entry, dict) else {}
 
 
@@ -372,16 +380,23 @@ def update_cache_from_lua_bytes(lua_bytes: bytes, app_id: str = "", app_name: st
     for depot_id, key in pairs:
         if not is_valid_key(key):
             continue
-        existing = data.get(depot_id) or {}
-        if existing.get("key"):
-            continue
+        existing = data.get(depot_id)
+        if isinstance(existing, str):
+            if existing:
+                continue
+            existing = {}
+        elif isinstance(existing, dict):
+            if existing.get("key"):
+                continue
+        else:
+            existing = {}
         is_root = str(app_id or "") == str(depot_id) and bool(app_name)
         entry = {
             "key": key.lower(),
-            "name": existing.get("name") or (_clean_text(app_name) if is_root else f"Depot {depot_id}"),
-            "kind": existing.get("kind") or ("game" if is_root else "depot"),
-            "parent_appid": "" if is_root else (existing.get("parent_appid") or str(app_id or "")),
-            "parent_name": "" if is_root else (existing.get("parent_name") or _clean_text(app_name)),
+            "name": existing.get("name") if isinstance(existing, dict) else "" or (_clean_text(app_name) if is_root else f"Depot {depot_id}"),
+            "kind": existing.get("kind") if isinstance(existing, dict) else "" or ("game" if is_root else "depot"),
+            "parent_appid": "" if is_root else (existing.get("parent_appid") if isinstance(existing, dict) else "" or str(app_id or "")),
+            "parent_name": "" if is_root else (existing.get("parent_name") if isinstance(existing, dict) else "" or _clean_text(app_name)),
         }
         data[depot_id] = _strip_parent_for_root(entry)
         added += 1

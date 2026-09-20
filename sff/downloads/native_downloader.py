@@ -290,6 +290,8 @@ def _decompress_chunk(data: bytes) -> bytes:
         return _decompress_vz1(data)
     if data[:4] == b"VSZa":
         return _decompress_vzstd(data)
+    if data[:4] == b"PK\x03\x04":
+        return _unzip_single(data)
     raise ValueError(f"unknown chunk magic: {data[:4].hex()}")
 
 
