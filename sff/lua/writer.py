@@ -49,6 +49,24 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _normalise_manifest_map(manifest_map: Optional[dict]) -> dict[str, str]:
+    if not manifest_map:
+        return {}
+    clean: dict[str, str] = {}
+    for depot_id, manifest_id in manifest_map.items():
+        depot_str = str(depot_id).strip()
+        manifest_str = str(manifest_id).strip()
+        if depot_str.isdigit() and manifest_str.isdigit():
+            clean[depot_str] = manifest_str
+    return clean
+
+
+def _manifest_map_for_lua(lua: LuaParsedInfo, manifest_override: Optional[dict]) -> dict[str, str]:
+    return _normalise_manifest_map(manifest_override) or _normalise_manifest_map(
+        getattr(lua, "manifest_overrides", {}) or {}
+    )
+
+
 @dataclass
 
 class ACFWriter:
@@ -81,6 +99,7 @@ class ACFWriter:
             app_name = get_game_name(lua.app_id)
             app_id_str = str(lua.app_id)
             installdir = sanitize_filename(app_name).replace("'", "").strip()
+            manifest_map = _manifest_map_for_lua(lua, manifest_override)
             acf_file.parent.mkdir(parents=True, exist_ok=True)
             if not installdir:
                 installdir = app_id_str
@@ -110,7 +129,19 @@ class ACFWriter:
                 "ScheduledAutoUpdate": "0",
                 "DownloadType": "1",
             }
-            app_state["InstalledDepots"] = {}
+            if manifest_map:
+                installed = {}
+                for i, (depot_id, manifest_id) in enumerate(manifest_map.items()):
+                    depot_size = str(size_on_disk) if i == 0 and size_on_disk else "0"
+                    installed[str(depot_id)] = {"manifest": str(manifest_id), "size": depot_size}
+                app_state["InstalledDepots"] = installed
+                print(
+                    f"InstalledDepots set for {len(manifest_map)} depot(s) -> "
+                    + ", ".join(f"{d}:{m}" for d, m in list(manifest_map.items())[:3])
+                    + ("..." if len(manifest_map) > 3 else "")
+                )
+            else:
+                app_state["InstalledDepots"] = {}
             acf_contents = {"AppState": app_state}
             vdf_dump(acf_file, acf_contents, tabbed=True)
             try:
@@ -139,6 +170,7 @@ class ACFWriter:
         app_name = get_game_name(lua.app_id)
         app_id_str = str(lua.app_id)
         installdir = sanitize_filename(app_name).replace("'", "").strip()
+        manifest_map = _manifest_map_for_lua(lua, manifest_override)
         if not installdir:
             installdir = app_id_str
             print(
@@ -168,10 +200,25 @@ class ACFWriter:
             "AllowOtherDownloadsWhileRunning": "0",
             "ScheduledAutoUpdate": "0",
             "DownloadType": "1",
-            "InstalledDepots": {},
             "UserConfig": {"language": "english"},
             "MountedConfig": {"language": "english"},
         }
+        if manifest_map:
+            if empty_depots:
+                app_state["InstalledDepots"] = {}
+            else:
+                installed = {}
+                for i, (depot_id, manifest_id) in enumerate(manifest_map.items()):
+                    depot_size = str(size_on_disk) if i == 0 and size_on_disk else "0"
+                    installed[str(depot_id)] = {"manifest": str(manifest_id), "size": depot_size}
+                app_state["InstalledDepots"] = installed
+            print(
+                f"InstalledDepots set for {len(manifest_map)} depot(s) -> "
+                + ", ".join(f"{d}:{m}" for d, m in list(manifest_map.items())[:3])
+                + ("..." if len(manifest_map) > 3 else "")
+            )
+        else:
+            app_state["InstalledDepots"] = {}
         acf_contents = {"AppState": app_state}
         vdf_dump(acf_file, acf_contents, tabbed=True)
         try:

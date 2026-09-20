@@ -21,6 +21,31 @@ import os
 import sys
 from pathlib import Path
 
+
+def _set_proc_title(title="SteaMidra"):
+    try:
+        try:
+            import setproctitle  # type: ignore
+
+            setproctitle.setproctitle(title)
+        except ImportError:
+            pass
+    except Exception:
+        pass
+    try:
+        import ctypes
+
+        libc = ctypes.CDLL(None)
+        libc.prctl(15, title.encode()[:15], 0, 0, 0)
+    except Exception:
+        pass
+
+
+try:
+    _set_proc_title("SteaMidra")
+except Exception:
+    pass
+
 # guard the PyQt6 import so a hollow build (CI accident) shows a useful
 # message instead of just dumping ModuleNotFoundError to a console window
 # that's already gone. happened once with the v6.3.1 workflow build —
@@ -310,6 +335,14 @@ def main():
                     not _desktop_file.exists()
                     or _new_exec not in _desktop_file.read_text(encoding="utf-8", errors="ignore")
                 )
+                _startup_wm = "StartupWMClass=steamidra"
+                if _desktop_file.exists():
+                    try:
+                        _existing = _desktop_file.read_text(encoding="utf-8", errors="ignore")
+                    except Exception:
+                        _existing = ""
+                    if _startup_wm not in _existing:
+                        _needs_write = True
                 if _needs_write:
                     _desktop_dir.mkdir(parents=True, exist_ok=True)
                     _desktop_file.write_text(
@@ -322,7 +355,8 @@ def main():
                         "Terminal=false\n"
                         "Type=Application\n"
                         "Categories=Utility;\n"
-                        "StartupNotify=false\n",
+                        "StartupNotify=false\n"
+                        "StartupWMClass=steamidra\n",
                         encoding="utf-8",
                     )
             except Exception:

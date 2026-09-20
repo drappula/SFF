@@ -580,8 +580,6 @@ def download_depot(
         if os_filter and os_filter != "all":
             lo = filename.lower()
             if os_filter == "linux":
-                if lo.endswith((".dll", ".exe")):
-                    os_filtered_count += 1; continue
                 if "/win" in lo and "/window" not in lo:
                     os_filtered_count += 1; continue
             elif os_filter == "windows":
@@ -849,9 +847,16 @@ def download_depot(
             # Byte-based, not chunk-count: chunks vary in size, so a
             # chunk-count percent drifted from the "X / Y bytes" shown next
             # to it (17% of chunks while 9.9% of bytes).
-            pct = (b / pending_bytes) * 100 if pending_bytes else 100.0
+            # Use overall depot size (including already-cached chunks) so the
+            # bar doesn't flicker between "341/503 MB" (pending) and
+            # "894/1100 MB" (overall) when native and DDMod report the same
+            # depot with different totals.
+            cached_bytes = total_size - pending_bytes if total_size and pending_bytes else 0
+            b_overall = b + max(0, cached_bytes)
+            total_overall = total_size if total_size else pending_bytes
+            pct = (b_overall / total_overall) * 100 if total_overall else 100.0
             print_fn(
-                f"[PROG] {pct:.1f}% | {b}/{pending_bytes} bytes | {speed:.0f} B/s"
+                f"[PROG] {pct:.1f}% | {b_overall}/{total_overall} bytes | {speed:.0f} B/s"
             )
 
         _last_prog_w = [0]

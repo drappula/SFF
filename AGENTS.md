@@ -30,9 +30,9 @@ Source of truth for agent behavior is `.claude/CLAUDE.md` — honor its setup, b
 
 ## Conventions
 
-- Prose that ships (comments, `CHANGELOG.md`, `release-note.md`, dialogs/toasts) must run the `unslop` skill. Comments sparse, only for genuinely confusing code — preserve war-story comments (e.g. PyQt6 guard in `Main_gui.py`).
+- Prose that ships (comments, `CHANGELOG.md`, `release-note.md`, dialogs/toasts) must run the `unslop` skill. Comments sparse, only for genuinely confusing code — preserve war-story comments (e.g. PyQt6 guard in `Main_gui.py`). Never use examples from the current conversation in code comments.
 - Every new source file starts with the GPL header block.
 - Git remotes: SSH only (`git@github.com:...`), never HTTPS.
 - Silent decisions (fallbacks, retries, provider verdicts, swallowed exceptions) must leave `logger.debug`/`logger.warning` breadcrumbs (bridges/core) or `print`+`colorama` in CLI flows — debug level unless user-visible. Long flows also log step entry so hangs are traceable.
-- `CHANGELOG.md`: if HEAD is latest release, add under `## Unreleased` (create if missing); else append to existing Unreleased. One–two sentences per entry, no session narrative, no examples from current work. If fixing unreleased-only code, fold into that feature's entry — no separate "Fixed:".
+- `CHANGELOG.md` — MANDATORY for every user-visible change. Never skip, even for small fixes. If `HEAD` is latest release, add under `## Unreleased` (create if missing); else append to existing `Unreleased`. One–two sentences per entry, no session narrative, no examples from current work. If fixing unreleased-only code, fold into that feature's entry — no separate `Fixed:`.
 - Release (only on explicit `<version>` like `6.6.8`): 1) `CHANGELOG.md` `## Unreleased` → `## <version>`, 2) `sff/core/strings.py` `VERSION = "<version>"`, 3) replace `release-note.md` with version-only notes, 4) commit via `caveman-commit` (`chore(release): v<version>`), 5) `git push origin main`, 6) `git tag -a v<version> -m "v<version>" && git push origin v<version>`, 7) watch `gh run list --workflow=release.yml`.

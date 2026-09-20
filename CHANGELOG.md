@@ -8,6 +8,8 @@
 - **Assassin's Creed and other old depots failed on the built-in downloader** — those depots store chunks as ZIP (`PK\x03\x04`), but the chunk handler only accepted `VZa`/`VSZa` and dropped the chunk. ZIP chunks now unzip and verify correctly.
 - **Depot file list required a Hubcap key** — the explorer only tried Hubcap on-demand when no local manifest was cached, so users without a Hubcap key always hit the "start a download first" error. It now tries LuasTools and the GitHub mirrors first, then Hubcap as fallback.
 - **Progress bar flickered to 0 on depot switch** — switching depots could briefly report `0` before the correct depot offset, making the bar dip then jump. Overall progress is now monotonic and never moves backwards within one download.
+- **Process showed as `python` in the system monitor** — the GUI and CLI set `python` as the process name. They now set `SteaMidra` via `prctl` (`setproctitle` if available) at startup, and the Linux `.desktop` file has `StartupWMClass=steamidra` so the dock groups under the correct icon.
+- **Linux installs showed `Content still encrypted` (Celeste 504230)** — `sff/linux/acf_writer.py` and `sff/lua/writer.py` wrote `InstalledDepots {}` after `6.8.0` to hide the update badge. New Linux installs therefore had `StateFlags 36` / empty depots and Steam flagged the files as encrypted even though the chunks decrypted correctly (`504231`/`504233` verified). The ACF now writes the pinned manifests again.
 
 ### Changed
 

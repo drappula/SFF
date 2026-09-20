@@ -46,6 +46,31 @@ import time
 
 import traceback
 
+
+def _set_proc_title(title="SteaMidra"):
+    try:
+        try:
+            import setproctitle  # type: ignore
+
+            setproctitle.setproctitle(title)
+        except ImportError:
+            pass
+    except Exception:
+        pass
+    try:
+        import ctypes
+
+        libc = ctypes.CDLL(None)
+        libc.prctl(15, title.encode()[:15], 0, 0, 0)
+    except Exception:
+        pass
+
+
+try:
+    _set_proc_title("SteaMidra")
+except Exception:
+    pass
+
 from pathlib import Path
 
 from typing import TYPE_CHECKING
