@@ -333,6 +333,14 @@ namespace {
     LM_HOOK(SendCallbackToPipe, bool, void* pSteamEngine, HSteamPipe hSteamPipe,
               HSteamUser iClientUser, int iCallback, void* pCallbackData, int cubCallbackData) {
         if (iCallback == AppLicensesChanged_t::k_iCallback) {
+            // Ported from Aether (OwnershipHooks::h_SendCallbackToPipe): force
+            // the "licenses changed" flag so Steam re-reads ownership. Without
+            // this, a boot where the one-shot LoadPackage / GetPackageInfo
+            // windows were missed (fresh build + late pattern download, beta
+            // boot timing) deadlocks: we never capture the package manager and
+            // Steam never queries ownership back into us.
+            if (pCallbackData && cubCallbackData >= 1)
+                *static_cast<bool*>(pCallbackData) = true;
             return oSendCallbackToPipe(pSteamEngine, hSteamPipe, iClientUser,
                                        iCallback, pCallbackData, cubCallbackData);
         }

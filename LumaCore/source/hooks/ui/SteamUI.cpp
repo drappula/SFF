@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstring>
 #include <mutex>
 #include <thread>
 #include <unordered_set>
@@ -26,8 +27,6 @@
 
 namespace {
     using namespace std::chrono_literals;
-    constexpr int  MAX_RETRY      = 20;
-    constexpr auto RETRY_INTERVAL = 300ms;
 
     // ▌ STEAMUI ▌ function type aliases
     using AddProtobufAsBinary_t = void*(__fastcall*)(void* /*args*/, void* /*proto*/);
@@ -84,26 +83,54 @@ namespace {
         { "AddProtobufAsBinary", "CJSMethodArgs::AddProtobufAsBinary" },
     };
 
+    // Basename match for LoadModuleWithPath, ported from Aether's
+    // h_LoadModuleWithPath. Steam has been seen passing both the bare
+    // "steamclient64.dll" and a fully qualified install path; an exact strcmp
+    // over the whole string silently misses the latter, and then the
+    // diagnostic block below never records anything at all.
+    bool IsSteamClientModule(const char* path) {
+        if (!path || !*path) return false;
+        const char* backslash = std::strrchr(path, '\\');
+        const char* slash     = std::strrchr(path, '/');
+        const char* name = (backslash && (!slash || backslash > slash)) ? backslash + 1
+                         : slash ? slash + 1
+                                 : path;
+        return _stricmp(name, "steamclient64.dll") == 0;
+    }
+
     // ▌ STEAMUI ▌ LoadModuleWithPath hook
     LM_HOOK(LoadModuleWithPath, HMODULE, const char* path, bool flags) {
         LOG_STEAMUICH_INFO("LoadModuleWithPath called with path: {} , flags: {} [tick={}]", path, flags, GetTickCount64());
         // First steamui-mapped callback also primes the pattern fetcher worker
         // when the loader had not mapped steamui.dll at InitThread dispatch.
         DispatchSteamUiPatternFetch();
-        // Wait for steamclient hooks to be installed before redirecting.
-        for (int idx = 0; idx < MAX_RETRY && !g_HooksInstalled.load(); ++idx) {
-            LOG_STEAMUICH_DEBUG("LoadModuleWithPath: waiting for hooks... (attempt {}/{})", idx + 1, MAX_RETRY);
-            std::this_thread::sleep_for(RETRY_INTERVAL);
-        }
+        // Direct mode installs every steamclient hook against the Steam-root
+        // DLL during bootstrap, so there is nothing to synchronise with here.
+        // The old 20 x 300 ms wait existed only to hold this call until the
+        // diversion copy was ready for the redirect; keeping it would stall
+        // SteamUI's module load for up to six seconds for no benefit.
         auto lmwpStart = std::chrono::steady_clock::now();
         HMODULE h = oLoadModuleWithPath(path, flags);
         auto lmwpElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - lmwpStart).count();
         LOG_STEAMUICH_INFO("LoadModuleWithPath({}) completed in {}ms", path, lmwpElapsed);
-        if (!strcmp(path, "steamclient64.dll")) {
-            h = diversion_hModule;
+        if (IsSteamClientModule(path)) {
+            // Direct mode: allow Steam's original loader result through
+            // unchanged. LumaCore has already hooked that same Steam-root DLL;
+            // this hook must never substitute a copied module.
             static int scCount = 0;
-            HookStatus::SetSteamUiAttachState("attached", ++scCount, false);
+            HMODULE live = GetModuleHandleA("steamclient64.dll");
+            const bool sameModule = live && live == diversion_hModule;
+            // Log the raw argument. This is what separates "Steam never asked
+            // for the module through this entry point" from "Steam asked, but
+            // under a spelling the old exact strcmp did not recognise".
+            LOG_STEAMUICH_INFO("LoadModuleWithPath: steamclient64 requested as \"{}\" -> live=0x{:X}, diversion_hModule=0x{:X}, {}",
+                               path, reinterpret_cast<uintptr_t>(live),
+                               reinterpret_cast<uintptr_t>(diversion_hModule),
+                               sameModule ? "same-module" : "MISMATCH");
+            HookStatus::SetSteamUiAttachState(
+                sameModule ? "original-module" : "original-module-mismatch",
+                ++scCount, false);
         }
         return h;
     }

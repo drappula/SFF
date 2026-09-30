@@ -770,17 +770,33 @@ namespace SteamCapture {
             }
         }
 
-        // ── Phase 1b: append additions to the package vector ──
+        // ── Phase 1b: reconcile the package vector with the Lua set ──
         std::vector<AppId_t> additions = LuaLoader::TakePendingAdditions();
-        if (!additions.empty())
-            PackagePatch::InjectIntoPackage0(pPkg, additions, "hot-reload");
+        if (!additions.empty()) {
+            // Aether parity (LicenseManager::NotifyLicenseChanged): reconcile
+            // against the COMPLETE current Lua set, not only the delta.
+            // Editors and AV rescanning fire repeated and partial filesystem
+            // events, so a pure delta can leave package 0 short or double-
+            // append. InjectIntoPackage0 -> EnsurePackageContains is idempotent:
+            // it skips ids already present.
+            PackagePatch::InjectIntoPackage0(pPkg, LuaLoader::GetAllDepotIds(),
+                                             "hot-reload");
+        }
 
         if (additions.empty() && removals.empty()) {
+            // Distinguish "the watcher produced nothing to apply" from the
+            // later failures: without this record the reload is invisible in
+            // status.json and debugging becomes guesswork.
             LOG_PACKAGE_DEBUG("NotifyLicenseChanged: no changes");
+            HookStatus::RecordHotReload(0, 0, 0, 0, "no-pending-changes");
             return;
         }
 
         // ── Phase 2: license refresh (Steam re-evaluates package state) ──
+        // Without this Steam has already built its library view and never
+        // re-reads package 0, so the vector mutation stays invisible. Each
+        // precondition is reported separately: the old combined guard
+        // collapsed three distinct failures into one message.
         bool refreshedLicense = false;
         if (g_pCUser && oMarkLicenseAsChanged && oProcessPendingLicenseUpdates) {
             oMarkLicenseAsChanged(g_pCUser, 0, true);
@@ -788,8 +804,21 @@ namespace SteamCapture {
             HookStatus::SetPackageState(false, false, false, true);
             refreshedLicense = true;
         } else {
-            HookStatus::SetStartupRefreshState("startup-waiting-cuser");
-            LOG_PACKAGE_WARN("NotifyLicenseChanged: pCUser not ready, package vector updated locally only");
+            if (!g_pCUser) {
+                HookStatus::SetStartupRefreshState("hot-reload-missing-pcuser");
+                LOG_PACKAGE_WARN("NotifyLicenseChanged: g_pCUser not captured "
+                                 "(MarkLicenseAsChanged never fired); local-only");
+            }
+            if (!oMarkLicenseAsChanged) {
+                HookStatus::SetStartupRefreshState("hot-reload-missing-marklicense");
+                LOG_PACKAGE_WARN("NotifyLicenseChanged: oMarkLicenseAsChanged unresolved");
+            }
+            if (!oProcessPendingLicenseUpdates) {
+                HookStatus::SetStartupRefreshState("hot-reload-missing-proclicense");
+                LOG_PACKAGE_WARN("NotifyLicenseChanged: oProcessPendingLicenseUpdates unresolved");
+            }
+            LOG_PACKAGE_WARN("NotifyLicenseChanged: license refresh skipped, "
+                             "package vector updated locally only");
         }
 
         std::unordered_set<AppId_t> libraryRoots;

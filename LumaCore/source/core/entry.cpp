@@ -21,6 +21,7 @@
 
 #include <atomic>
 #include <mutex>
+#include <string.h>
 #include <string>
 #include <string_view>// ═══════════════════════════════════════════════════════════════════════
 //  CoreInit — module SHA tracking + bootstrap pipeline
@@ -122,25 +123,14 @@ namespace CoreInit {
 
     } // namespace Patterns
 
-    // ── Diversion ────────────────────────────────────────────────────
+    // -- Steam client module -------------------------------------------------
     namespace Diversion {
 
-        // Prepares the runtime paths and loads the hooked copy of steamclient64.dll.
-        //
-        // The diversion pattern: instead of hooking the real steamclient64.dll directly,
-        // LumaCore copies it to bin\lcoverlay.dll and loads that copy. The SteamUI hook then
-        // intercepts steamui.dll's LoadModuleWithPath("steamclient64.dll") call and returns
-        // diversion_hModule, so Steam's UI layer ends up using the hooked copy transparently.
-        //
-        // CopyFileA is retried up to 25 times (3 seconds total) because steamclient64.dll can be
-        // briefly locked by the Steam service during early startup. Same retry logic for LoadLibraryA.
-        // Returns false if either operation fails after all retries.
+        // Load the original Steam DLL by its absolute path and make it the
+        // sole hook target. Do not copy it, rename it, or redirect SteamUI to
+        // a second image: Steam and LumaCore must share this exact HMODULE.
         bool PrepareAndLoad()
         {
-            constexpr int kCopyRetries  = 25;
-            constexpr int kLoadRetries  = 25;
-            constexpr int kRetryDelayMs = 120;
-
             HMODULE hSelf = nullptr;
             GetModuleHandleExA(
                 GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
@@ -151,40 +141,63 @@ namespace CoreInit {
             char* lastSlash = strrchr(SteamInstallPath, '\\');
             if (lastSlash) *lastSlash = '\0';
 
-            sprintf_s(SteamclientPath, MAX_PATH, "%s\\steamclient64.dll",   SteamInstallPath);
-            sprintf_s(DiversionPath,   MAX_PATH, "%s\\bin\\lcoverlay.dll",  SteamInstallPath);
-            sprintf_s(LuaDir,          MAX_PATH, "%s\\config\\stplug-in",   SteamInstallPath);
-            sprintf_s(ConfigPath,      MAX_PATH, "%s\\lumacore.toml",       SteamInstallPath);
-            sprintf_s(PayloadPath,     MAX_PATH, "%s\\LumaCorePayload.dll", SteamInstallPath);
-            // ensure bin\ directory exists before copying
-            char binDir[MAX_PATH];
-            sprintf_s(binDir, MAX_PATH, "%s\\bin", SteamInstallPath);
-            CreateDirectoryA(binDir, nullptr);
-            // Retry: steamclient64.dll may be briefly locked during Steam startup
-            {
-                int attempts = 0;
-                while (!CopyFileA(SteamclientPath, DiversionPath, FALSE)) {
-                    if (++attempts >= kCopyRetries) {
-                        LOG_COREIN_ERROR("\"stage\" \"Diversion\" \"err\" \"copy-fail\" \"from\" \"{}\" \"to\" \"{}\"", SteamclientPath, DiversionPath);
-                        return false;
-                    }
-                    LOG_COREIN_WARN("\"stage\" \"Diversion\" \"act\" \"copy-retry\" {} err={}", attempts, GetLastError());
-                    Sleep(kRetryDelayMs);
-                }
+            sprintf_s(SteamclientPath, MAX_PATH, "%s\\steamclient64.dll", SteamInstallPath);
+            // Retained for diagnostics only; it names the original DLL, never
+            // a copied or diverted file.
+            strcpy_s(DiversionPath, MAX_PATH, SteamclientPath);
+            sprintf_s(LuaDir, MAX_PATH, "%s\\config\\stplug-in", SteamInstallPath);
+            sprintf_s(ConfigPath, MAX_PATH, "%s\\lumacore.toml", SteamInstallPath);
+            sprintf_s(PayloadPath, MAX_PATH, "%s\\LumaCorePayload.dll", SteamInstallPath);
+
+            diversion_hModule = LoadLibraryA(SteamclientPath);
+            if (!diversion_hModule) {
+                const DWORD err = GetLastError();
+                LOG_COREIN_ERROR("\"stage\" \"Steamclient\" \"err\" \"load-original-failed\" \"path\" \"{}\" winerr={}",
+                                 SteamclientPath, err);
+                HookStatus::SetDiversionState(false, "load-original-failed");
+                return false;
             }
-            {
-                int attempts = 0;
-                while (!(diversion_hModule = LoadLibraryA(DiversionPath))) {
-                    if (++attempts >= kLoadRetries) {
-                        LOG_COREIN_ERROR("\"stage\" \"Diversion\" \"err\" \"load-fail\" \"path\" \"{}\"", DiversionPath);
-                        return false;
-                    }
-                    LOG_COREIN_WARN("\"stage\" \"Diversion\" \"act\" \"load-retry\" {} err={}", attempts, GetLastError());
-                    Sleep(kRetryDelayMs);
-                }
+
+            // ── Module-identity assertion ───────────────────────────
+            // Ported from Aether's Diversion::LiveSteamclientMapped().
+            // A successful LoadLibraryA is NOT proof that we hooked the
+            // module Steam actually uses: a same-named DLL mapped from
+            // another directory (or a stale copied image) would take the
+            // hooks and never be called. Compare the mapped module's own
+            // path against the Steam-root path we asked for, and publish
+            // the verdict so status.json can settle the question alone.
+            char modulePath[MAX_PATH] = {};
+            const DWORD modulePathLen =
+                GetModuleFileNameA(diversion_hModule, modulePath, MAX_PATH);
+            const bool modulePathOk =
+                modulePathLen > 0 && modulePathLen < MAX_PATH;
+            const char* modulePathOut = modulePathOk ? modulePath : "<unresolved>";
+            const bool pathMatches =
+                modulePathOk && _stricmp(modulePath, SteamclientPath) == 0;
+
+            HookStatus::SetDiversionState(
+                true, pathMatches ? "original-live-module" : "module-path-mismatch");
+            HookStatus::SetLoaderState(
+                "lumacore",
+                pathMatches ? "steamclient64-direct" : "steamclient64-MISMATCH",
+                modulePathOut);
+
+            // Publish the resolved paths so status.json names the exact image
+            // the hooks were installed on. Re-issued in Bootstrap::Run once
+            // the pattern legs have supplied the on-disk SHAs.
+            if (!GetModuleFileNameA(nullptr, SteamExePath, MAX_PATH))
+                SteamExePath[0] = '\0';
+            sprintf_s(SteamUiPath, MAX_PATH, "%s\\steamui.dll", SteamInstallPath);
+            HookStatus::SetBinarySnapshot(SteamExePath, SteamclientPath, SteamUiPath,
+                                          DiversionPath, {}, {}, {});
+
+            LOG_COREIN_INFO("\"stage\" \"Steamclient\" \"act\" \"original-loaded-direct\" \"path\" \"{}\" \"module\" 0x{:X} \"identity\" \"{}\"",
+                            SteamclientPath, reinterpret_cast<uintptr_t>(diversion_hModule),
+                            pathMatches ? "match" : "mismatch");
+            if (!pathMatches) {
+                LOG_COREIN_ERROR("\"stage\" \"Steamclient\" \"err\" \"module-path-mismatch\" \"asked\" \"{}\" \"mapped\" \"{}\"",
+                                 SteamclientPath, modulePathOut);
             }
-            LOG_COREIN_INFO("\"stage\" \"Diversion\" \"act\" \"loaded\" \"path\" \"{}\"", DiversionPath);
-            HookStatus::SetDiversionState(true, "loaded");
             return true;
         }
 
@@ -238,8 +251,8 @@ namespace CoreInit {
             LOG_COREIN_INFO("\"stage\" \"Bootstrap\" \"act\" \"start\" \"build\" \"{} {}\"", __DATE__, __TIME__);
             HookStatus::SetStartupPhase("start");
 
-            // Build id first so HookStatus has a value to surface even if the
-            // diversion copy below fails.
+            // Build id first so HookStatus has a value to surface even if
+            // loading Steam's original steamclient64.dll fails.
             BuildId::Detect();
             HookStatus::SetBuildId(g_steamBuildId);
 
@@ -251,6 +264,7 @@ namespace CoreInit {
                 return 1;
             }
 
+
             // ── Steamclient leg: synchronous cache + network ─────────
             PatternFetcher::PatternResult pcResult =
                 PatternFetcher::LoadFor(diversion_hModule, "steamclient");
@@ -259,6 +273,8 @@ namespace CoreInit {
                        static_cast<unsigned>(pcResult.entries.size()),
                        pcResult.ok ? 1 : 0);
 
+            // Install the critical steamclient hooks immediately after their
+            // pattern table is ready; do this before SteamUI hook-up.
             HookStatus::SetStartupPhase("installing_critical_hooks");
             PackagePatch::Install();
             SteamCapture::Install();
@@ -299,12 +315,24 @@ namespace CoreInit {
                 g_shas.uiSha     = puResult.sha;
             }
             HookStatus::SetShas(pcResult.sha, puResult.sha);
+            // Re-publish the binary snapshot now that both pattern legs have
+            // supplied the on-disk SHAs of the modules we are keyed to. Paths
+            // plus SHAs make status.json self-proving: it names the exact
+            // file Steam is running and the file LumaCore hooked. In direct
+            // mode the "diversion" IS the original DLL, so its file SHA is by
+            // definition the steamclient SHA.
+            HookStatus::SetBinarySnapshot(SteamExePath, SteamclientPath, SteamUiPath,
+                                          DiversionPath, pcResult.sha, puResult.sha,
+                                          pcResult.sha);
             HookStatus::SetTomlAvailability("steamclient", pcResult.ok);
             HookStatus::SetTomlAvailability("steamui",     puResult.ok);
             HookStatus::SetStartupPhase("patterns_loaded");
             HookStatus::WriteToDisk();
 
-            // ── SteamUI::CoreHook() must be early to catch LoadModuleWithPath ──
+            // steamclient patterns and hooks always target the original DLL
+            // loaded directly from SteamclientPath; no copy/redirect fallback.
+
+            // ── SteamUI hooks are retained for library UI refreshes; they no longer redirect steamclient ──
             HookStatus::SetStartupPhase("installing_hooks");
             SteamUI::CoreHook();
 

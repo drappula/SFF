@@ -48,8 +48,8 @@ namespace PatternFetcher {
 
         constexpr const char* kPrimaryHost = "raw.githubusercontent.com";
         constexpr const char* kCdnHost     = "cdn.jsdelivr.net";
-        constexpr const char* kPrimaryPathPrefix = "/KoriaPolis/Steam-Auto-PT/pattern/";
-        constexpr const char* kCdnPathPrefix     = "/gh/KoriaPolis/Steam-Auto-PT@pattern/";
+        constexpr const char* kPrimaryPathPrefix = "/michelegoku3/MigoReleases/pattern/";
+        constexpr const char* kCdnPathPrefix     = "/gh/michelegoku3/MigoReleases@pattern/";
 
         // gitflic mirror lives at midrags/steam-auto-pt on the pattern branch.
         // Per-file raw fetches are gated behind login on gitflic, so we go

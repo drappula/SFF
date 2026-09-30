@@ -4,8 +4,8 @@ LumaCore is the DLL component that SteaMidra injects into Steam to handle family
 
 It ships as four files placed in the Steam installation directory:
 
-- `dwmapi.dll` — thin DWM proxy that Steam loads on startup; immediately loads LumaCore.dll
-- `xinput1_4.dll` — thin XInput 1.4 proxy; backup load gate for LumaCore.dll
+- `xinput1_4.dll` — thin XInput 1.4 proxy; PRIMARY bootstrap. Loads LumaCore.dll from a worker thread after DllMain (Aether 14a6359 lesson: XInput is the only startup gate Steam still loads from its own directory)
+- `dwmapi.dll` — thin DWM proxy; legacy/secondary gate, same safe worker-thread load
 - `LumaCore.dll` — the main hook library
 - `LumaCorePayload.dll` — injected into game processes for online-fix multiplayer (EOS bridge, lobby redirection)
 

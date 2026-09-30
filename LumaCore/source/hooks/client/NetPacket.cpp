@@ -4,6 +4,7 @@
 // See <https://www.gnu.org/licenses/> for the full license text.
 
 #include "hooks/client/NetPacket.h"
+#include "Steam/NetPacketLayout.h"
 #include "hooks/client/NetPacket_AccessToken.h"
 #include "hooks/client/NetPacket_UserStats.h"
 #include "hooks/client/NetPacket_ETicket.h"
@@ -21,6 +22,8 @@
 #include "runtime/LcFnvHash.h"
 #include "hooks/Macros.h"
 
+#include <algorithm>
+#include <cstdint>
 #include <unordered_map>
 #include <mutex>
 
@@ -39,13 +42,22 @@ static bool ParsePacket(const uint8_t* data, uint32_t size,
     pHdr = nullptr;
     pBody = nullptr;
     cbBody = 0;
-    if (!data || size < sizeof(MsgHdr)) return false;
+    // Steam beta may use a non-null "no data" sentinel in m_pubData. Treat
+    // every non-canonical/unreadable value as absent before dereferencing it.
+    // Bound the span too: a plausible pointer plus a corrupt size must not
+    // make protobuf parsing walk arbitrary memory.
+    constexpr uint32_t kMaxReadablePacket = 64u * 1024u * 1024u;
+    const uintptr_t addr = reinterpret_cast<uintptr_t>(data);
+    if (!data || addr < 0x10000ull || addr >= 0x7FFFFFFF0000ull ||
+        size < sizeof(MsgHdr) || size > kMaxReadablePacket ||
+        !NetPkt::IsReadable(data, size))
+        return false;
     const MsgHdr* hdr = reinterpret_cast<const MsgHdr*>(data);
     if (!(hdr->eMsg & kMsgHdrProtoFlag)) return false;
     eMsg  = static_cast<EMsg>(hdr->eMsg & ~kMsgHdrProtoFlag);
     cbHdr = hdr->headerLength;
-    uint32_t off = sizeof(MsgHdr) + cbHdr;
-    if (off > size) return false;
+    if (cbHdr > size - static_cast<uint32_t>(sizeof(MsgHdr))) return false;
+    const uint32_t off = static_cast<uint32_t>(sizeof(MsgHdr)) + cbHdr;
     pHdr   = data + sizeof(MsgHdr);
     pBody  = data + off;
     cbBody = size - off;
@@ -176,6 +188,179 @@ static void RouteInboundDispatch(EMsg eMsg, const uint8_t* pBody, uint32_t cbBod
     }
 }
 
+// ── CNetPacket layout detection ────────────────────────────
+// The beta client shifted m_pubData/m_cubData by +8 (see Steam/NetPacketLayout.h),
+// so the offsets are identified from a live packet instead of compiled in.
+//
+// The bar is deliberately high. A failed probe costs one packet — it is
+// passed through untouched and the next one is tried. A wrong latch costs a
+// wild pointer write into a live Steam object from several call sites plus a
+// corrupted refcount, so every additional check is worth its deferral.
+
+namespace NetPkt {
+
+    bool IsReadable(const void* addr, size_t bytes)
+    {
+        if (!addr || bytes == 0) return false;
+
+        const uintptr_t start = reinterpret_cast<uintptr_t>(addr);
+        if (start > UINTPTR_MAX - bytes) return false;   // wraps
+        const uintptr_t end = start + bytes;
+
+        for (uintptr_t cursor = start; cursor < end; ) {
+            MEMORY_BASIC_INFORMATION mbi{};
+            if (VirtualQuery(reinterpret_cast<LPCVOID>(cursor), &mbi, sizeof(mbi)) != sizeof(mbi))
+                return false;
+            // Strip the modifier bits before comparing — they combine with the
+            // base protection rather than replacing it. A guard page faults on
+            // first touch, so reading it is not safe even though its base
+            // protection says otherwise; PAGE_NOACCESS and bare PAGE_EXECUTE
+            // (execute-only) are unreadable on purpose.
+            const DWORD base = mbi.Protect & ~static_cast<DWORD>(PAGE_GUARD | PAGE_NOCACHE | PAGE_WRITECOMBINE);
+            const bool readable =
+                mbi.State == MEM_COMMIT &&
+                !(mbi.Protect & PAGE_GUARD) &&
+                (base == PAGE_READONLY || base == PAGE_READWRITE || base == PAGE_WRITECOPY ||
+                 base == PAGE_EXECUTE_READ || base == PAGE_EXECUTE_READWRITE ||
+                 base == PAGE_EXECUTE_WRITECOPY);
+            if (!readable) return false;
+
+            const uintptr_t regionEnd = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+            if (regionEnd <= cursor) return false;   // no forward progress; refuse to spin
+            cursor = regionEnd;
+        }
+        return true;
+    }
+
+} // namespace NetPkt
+
+namespace {
+
+    constexpr uint32    kProbeMaxPacket   = 1u << 20;   // 1 MiB — NOT the pool cap:
+                                                        // a large Multi must not fail the true candidate
+    constexpr uint32    kProbeMaxHdrLen   = 8192;
+    constexpr uintptr_t kProbeMinPtr      = 0x10000;
+    constexpr uintptr_t kProbeMaxPtr      = 0x7FFFFFFF0000ull;
+    constexpr int       kProbeMaxAttempts = 512;
+
+    int   g_ProbeAttempts = 0;
+    uint32 g_ProbeAgreed  = NetPkt::kUnresolved;   // candidate that won the previous packet
+    bool  g_ProbeLogged   = false;
+
+    // Does `dataOff` describe this packet? Reads nothing it has not first
+    // proved readable.
+    bool ProbeLayout(const void* base, uint32 dataOff)
+    {
+        const uint8* p = static_cast<const uint8*>(base);
+
+        // Validate the packet object's own storage before forming/reading any
+        // candidate field address. Includes both known layouts through +0x20.
+        if (!NetPkt::IsReadable(base, static_cast<size_t>(dataOff) + 0x10)) return false;
+
+        // data (8) + size (4) + cRef (4)
+        if (!NetPkt::IsReadable(p + dataOff, 0x10)) return false;
+
+        const uint8* ptr  = *reinterpret_cast<const uint8* const*>(p + dataOff);
+        const uint32 size = *reinterpret_cast<const uint32*>(p + dataOff + 8);
+        const int32  cRef = *reinterpret_cast<const int32*>(p + dataOff + 0x0C);
+
+        const uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
+        if (addr < kProbeMinPtr || addr >= kProbeMaxPtr)      return false;
+        if (size < sizeof(MsgHdr) || size > kProbeMaxPacket)  return false;
+        if (cRef < 1 || cRef > 4096)                          return false;
+
+        if (!NetPkt::IsReadable(ptr, sizeof(MsgHdr))) return false;
+
+        // Read the header dword raw. EMsg is an unscoped enum with a signed
+        // underlying type, so testing 0x80000000 through MsgHdr::eMsg only
+        // works by accident.
+        const uint32 raw    = *reinterpret_cast<const uint32*>(ptr);
+        const uint32 hdrLen = *reinterpret_cast<const uint32*>(ptr + 4);
+        if (!(raw & kMsgHdrProtoFlag))                        return false;
+        const uint32 eMsg = raw & ~kMsgHdrProtoFlag;
+        if (eMsg == 0 || eMsg >= 0x10000)                     return false;
+        if (hdrLen < 2 || hdrLen > (std::min)(size - static_cast<uint32>(sizeof(MsgHdr)), kProbeMaxHdrLen))
+            return false;
+
+        if (!NetPkt::IsReadable(ptr, sizeof(MsgHdr) + hdrLen)) return false;
+
+        // Strongest signal available: the bytes actually are a Steam protobuf
+        // header. Only ever runs while probing.
+        CMsgProtoBufHeader hdr;
+        if (!hdr.ParseFromArray(ptr + sizeof(MsgHdr), static_cast<int>(hdrLen))) return false;
+
+        return true;
+    }
+
+    // Identify the layout from one packet. Latches only when exactly one
+    // candidate matches and the same candidate also won the previous packet:
+    // ambiguity is the one thing we must never latch on, and requiring two
+    // agreeing packets costs at most one early proto message.
+    bool TryResolveLayout(const CNetPacket* pPacket)
+    {
+        if (NetPkt::IsDisabled()) return false;
+
+        if (++g_ProbeAttempts > kProbeMaxAttempts) {
+            if (!g_ProbeLogged) {
+                g_ProbeLogged = true;
+                NetPkt::Disable();
+                LOG_NETPACKET_ERROR(
+                    "CNetPacket layout unidentified after {} packets - netpacket features "
+                    "disabled for this session (no field will be touched). This means the "
+                    "client's layout matches no known candidate; add one to NetPkt::kLayouts.",
+                    kProbeMaxAttempts);
+            }
+            return false;
+        }
+
+        uint32 winner = NetPkt::kUnresolved;
+        int    passes = 0;
+        for (const auto& layout : NetPkt::kLayouts) {
+            if (ProbeLayout(pPacket, layout.dataOff)) {
+                ++passes;
+                winner = layout.dataOff;
+            }
+        }
+
+        if (passes == 0) {
+            // No candidate matched, which is what a non-protobuf frame looks
+            // like — it carries no evidence either way. Leave any standing
+            // agreement intact: discarding it here would mean one interleaved
+            // non-proto packet restarts the confirmation, which is exactly what
+            // early connection traffic does.
+            LOG_NETPACKET_TRACE("CNetPacket probe: no candidate matched (attempt {}), "
+                                "likely a non-proto frame", g_ProbeAttempts);
+            return false;
+        }
+        if (passes > 1) {
+            // Genuine ambiguity — both layouts read as valid on the same
+            // packet. That IS evidence, and it says do not trust the standing
+            // agreement.
+            LOG_NETPACKET_TRACE("CNetPacket probe: {} candidates matched, ambiguous (attempt {})",
+                                passes, g_ProbeAttempts);
+            g_ProbeAgreed = NetPkt::kUnresolved;
+            return false;
+        }
+        if (g_ProbeAgreed != winner) {
+            LOG_NETPACKET_TRACE("CNetPacket probe: candidate 0x{:X} matched, awaiting confirmation",
+                                winner);
+            g_ProbeAgreed = winner;
+            return false;
+        }
+
+        const char* name = "?";
+        for (const auto& layout : NetPkt::kLayouts)
+            if (layout.dataOff == winner) name = layout.name;
+
+        NetPkt::Latch(winner);
+        LOG_NETPACKET_INFO("CNetPacket layout = {} (m_pubData +0x{:X}, m_cubData +0x{:X}), "
+                           "confirmed on two consecutive packets after {} attempt(s)",
+                           name, winner, winner + 8, g_ProbeAttempts);
+        return true;
+    }
+
+} // namespace
+
 // ═══════════════════════════════════════════════════════════════════
 //  Hooks
 // ═══════════════════════════════════════════════════════════════════
@@ -206,6 +391,30 @@ LM_HOOK(BBuildAndAsyncSendFrame, bool,
 
 LM_HOOK(RecvPkt, void*, void* pThis, CNetPacket* pPacket)
 {
+    // Identify the packet layout before anything reads or writes a field
+    // (see Steam/NetPacketLayout.h). Until the layout is confirmed the packet
+    // is handed straight back untouched, so a field is never accessed at an
+    // unverified offset - this is what keeps Steam booting on the beta client.
+    //
+    // Skipping costs nothing meaningful: injections and replacements are only
+    // delayed until the layout is known, not dropped, and RecvJob acts on
+    // protobuf messages - exactly the set the probe latches on.
+    if (!pPacket) return oRecvPkt(pThis, pPacket);
+    if (!NetPkt::IsResolved() && !TryResolveLayout(pPacket))
+        return oRecvPkt(pThis, pPacket);
+
+    const uint32_t dataOff = NetPkt::State();
+    if (dataOff == NetPkt::kUnresolved || dataOff == NetPkt::kDisabled ||
+        !NetPkt::IsReadable(pPacket, static_cast<size_t>(dataOff) + 0x10))
+        return oRecvPkt(pThis, pPacket);
+    const uint8_t* packetData = NetPkt::Data(pPacket);
+    const uint32_t packetSize = NetPkt::Size(pPacket);
+    const uintptr_t packetAddr = reinterpret_cast<uintptr_t>(packetData);
+    if (!packetData || packetAddr < 0x10000ull || packetAddr >= 0x7FFFFFFF0000ull ||
+        packetSize < sizeof(MsgHdr) || packetSize > 64u * 1024u * 1024u ||
+        !NetPkt::IsReadable(packetData, packetSize))
+        return oRecvPkt(pThis, pPacket);
+
     RichPresence::DeliverPending(
         pThis, pPacket,
         [](void* pT, CNetPacket* pP) -> bool {
@@ -215,7 +424,7 @@ LM_HOOK(RecvPkt, void*, void* pThis, CNetPacket* pPacket)
     EMsg eMsg;
     const uint8_t *pBody, *pHdr;
     uint32_t cbBody, cbHdr;
-    if (ParsePacket(pPacket->m_pubData, pPacket->m_cubData,
+    if (ParsePacket(NetPkt::Data(pPacket), NetPkt::Size(pPacket),
                     eMsg, pHdr, cbHdr, pBody, cbBody)) {
         NetPacket::s_rx.Shrunk = false;
         RouteInboundDispatch(eMsg, pBody, cbBody, pHdr, cbHdr);
@@ -225,7 +434,7 @@ LM_HOOK(RecvPkt, void*, void* pThis, CNetPacket* pPacket)
                 NetPacket::s_rx.Hdr, NetPacket::s_rx.HdrLen,
                 pBody, NetPacket::s_rx.NewBodySize, s_rxLock);
         } else if (NetPacket::s_rx.Shrunk) {
-            pPacket->m_cubData = sizeof(MsgHdr) + cbHdr + NetPacket::s_rx.NewBodySize;
+            NetPkt::Size(pPacket) = sizeof(MsgHdr) + cbHdr + NetPacket::s_rx.NewBodySize;
         } else if (NetPacket::s_rx.PatchHdr || NetPacket::s_rx.PatchBody) {
             NetPacket::s_rx.Replace(pPacket,
                 NetPacket::s_rx.PatchHdr  ? NetPacket::s_rx.Hdr  : pHdr,
@@ -247,14 +456,14 @@ uint8_t* PacketPool<true>::Replace(CNetPacket* p, const uint8_t* newHdr, uint32_
     if (newSize > sizeof(Frame[0])) return nullptr;
     std::lock_guard<std::mutex> lock(mtx);
     uint8_t* buf = Frame[FrameIdx];
-    const MsgHdr* orig = reinterpret_cast<const MsgHdr*>(p->m_pubData);
+    const MsgHdr* orig = reinterpret_cast<const MsgHdr*>(NetPkt::Data(p));
     MsgHdr* out = reinterpret_cast<MsgHdr*>(buf);
     out->eMsg         = orig->eMsg;
     out->headerLength = cbNewHdr;
     memcpy(buf + sizeof(MsgHdr), newHdr, cbNewHdr);
     if (cbNewBody) memcpy(buf + sizeof(MsgHdr) + cbNewHdr, newBody, cbNewBody);
-    p->m_pubData = buf;
-    p->m_cubData = newSize;
+    NetPkt::Data(p) = buf;
+    NetPkt::Size(p) = newSize;
     FrameIdx = (FrameIdx + 1) % kPoolSlots;
     return buf;
 }

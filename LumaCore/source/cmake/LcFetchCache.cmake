@@ -30,15 +30,58 @@ if(NOT DEFINED LUMACORE_DEPS_DIR)
 endif()
 
 # For each known dependency, if a source dir is already cached at the shared
-# location, point FetchContent at it so populate becomes a no-op.
+# location, point FetchContent at it so populate becomes a no-op. Verify a
+# well-known file first: an interrupted populate (or an antivirus sweep) can
+# leave a directory behind that exists but has no sources - an override
+# pointing at it skips the download and the configure dies much later at
+# generate time with a cryptic "No SOURCES given to target". Broken entries
+# are deleted here so the populate below re-downloads just those.
 set(_LC_ALL_CACHED TRUE)
 foreach(_dep IN ITEMS lua detours spdlog protobuf tomlplusplus)
     string(TOUPPER "${_dep}" _UPPER)
     set(_src "${LUMACORE_DEPS_DIR}/${_dep}-src")
+    set(_valid FALSE)
     if(IS_DIRECTORY "${_src}")
+        if(_dep STREQUAL "lua")
+            # Accept the flat layout and an archive extracted with its
+            # top-level lua-5.5.0/ folder intact - both are seen in the wild.
+            file(GLOB _lua_hits "${_src}/src/lua.h" "${_src}/*/src/lua.h")
+            if(_lua_hits)
+                set(_valid TRUE)
+            endif()
+        elseif(_dep STREQUAL "detours")
+            # Detours has no root CMakeLists (LcDetours builds it by hand).
+            if(EXISTS "${_src}/src/detours.cpp")
+                set(_valid TRUE)
+            endif()
+        elseif(_dep STREQUAL "protobuf")
+            # protobuf v3.15.3 keeps its CMake project under cmake/ and is
+            # intentionally added with SOURCE_SUBDIR cmake.
+            if(EXISTS "${_src}/cmake/CMakeLists.txt" AND
+               EXISTS "${_src}/src/google/protobuf/compiler/main.cc")
+                set(_valid TRUE)
+            endif()
+        else()
+            # spdlog / tomlplusplus: git checkouts with a root CMakeLists.
+            if(EXISTS "${_src}/CMakeLists.txt")
+                set(_valid TRUE)
+            endif()
+        endif()
+    endif()
+
+    if(_valid)
         set(FETCHCONTENT_SOURCE_DIR_${_UPPER} "${_src}" CACHE PATH
             "Pre-populated ${_dep} source dir" FORCE)
     else()
+        if(IS_DIRECTORY "${_src}")
+            message(STATUS "FetchContent: removing broken cache entry ${_src}")
+            file(REMOVE_RECURSE "${_src}")
+        endif()
+        # Also clear any override left in CMakeCache.txt by an earlier run:
+        # FetchContent treats an empty FETCHCONTENT_SOURCE_DIR_<NAME> as unset,
+        # so the populate below becomes the only path for this dependency.
+        set(FETCHCONTENT_SOURCE_DIR_${_UPPER} "" CACHE PATH
+            "Pre-populated ${_dep} source dir" FORCE)
         set(_LC_ALL_CACHED FALSE)
     endif()
 endforeach()

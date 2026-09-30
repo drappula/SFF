@@ -8,6 +8,7 @@
 #include <windows.h>
 #include <cstring>
 #include <string>
+#include <cwchar>
 #include <mutex>
 
 // ── Exports (via xinput1_4.def) ──────────────────────────────────────
@@ -162,23 +163,53 @@ DWORD WINAPI XInputOrdinal108(DWORD a1, void* a2, void* a3, void* a4, void* a5)
 
 } // extern "C"
 
-// ─── LumaCore Injection ──────────────────────────────────────────────
-// Only inject when the host process is steam.exe (case-insensitive).
-BOOL LumaCoreLoad()
+// ─── LumaCore Injection ──────────────────────────────────────────────────────
+// Bootstrap rules, ported from Aether's dwmapi -> xinput1_4 switch
+// (michelegoku3/Aether commit 14a6359): 
+//   * xinput1_4.dll is the only bootstrap Steam still loads from its own
+//     directory after the beta changes; treat it as the primary gate.
+//   * NEVER LoadLibrary inside DllMain: the loader lock is held during
+//     DLL_PROCESS_ATTACH, so the core is loaded from a worker thread that
+//     runs after DllMain returns.
+//   * inject only when the host is steam.exe AND this proxy sits beside it,
+//     so a copy dropped in a game folder forwards but never injects.
+//   * LumaCore.dll is loaded by ABSOLUTE path (this proxy's directory), so a
+//     working-directory change cannot break the load.
+//   * failures are non-fatal: DllMain always returns TRUE, a missing
+//     LumaCore.dll must never stop Steam from booting.
+static DWORD WINAPI LoadCoreWorker(LPVOID parameter)
 {
-    char exePath[MAX_PATH];
-    if (!GetModuleFileNameA(NULL, exePath, MAX_PATH))
-        return TRUE;
+    const HMODULE self = static_cast<HMODULE>(parameter);
 
-    const char* exeName = strrchr(exePath, '\\');
-    exeName = exeName ? exeName + 1 : exePath;
-    if (_stricmp(exeName, "steam.exe") != 0)
-        return TRUE;   // not Steam — let the proxy load, but don't inject
+    wchar_t exePath[MAX_PATH] = {};
+    wchar_t proxyPath[MAX_PATH] = {};
+    const DWORD exeLen = GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+    const DWORD proxyLen = GetModuleFileNameW(self, proxyPath, MAX_PATH);
+    if (!exeLen || exeLen >= MAX_PATH || !proxyLen || proxyLen >= MAX_PATH) {
+        OutputDebugStringW(L"[LumaCore] xinput1_4: module path unavailable; injection skipped.\n");
+        return 0;
+    }
 
-    if (GetModuleHandleA("LumaCore.dll"))
-        return TRUE;   // already loaded by another proxy
+    const wchar_t* exeSlash = std::wcsrchr(exePath, L'\\');
+    wchar_t* proxySlash = wcsrchr(proxyPath, L'\\');
+    if (!exeSlash || !proxySlash || _wcsicmp(exeSlash + 1, L"steam.exe") != 0)
+        return 0;   // forward normally, but never inject into a game or helper.
 
-    return LoadLibraryA("LumaCore.dll") != NULL;
+    const size_t exeDirLen = static_cast<size_t>(exeSlash - exePath);
+    const size_t proxyDirLen = static_cast<size_t>(proxySlash - proxyPath);
+    if (exeDirLen != proxyDirLen || _wcsnicmp(exePath, proxyPath, exeDirLen) != 0) {
+        OutputDebugStringW(L"[LumaCore] xinput1_4 is not beside steam.exe; injection skipped.\n");
+        return 0;
+    }
+
+    if (GetModuleHandleW(L"LumaCore.dll"))
+        return 0;   // already loaded by the other proxy.
+
+    std::wstring core(proxyPath, proxyDirLen);
+    core += L"\\LumaCore.dll";
+    if (!LoadLibraryW(core.c_str()))
+        OutputDebugStringW(L"[LumaCore] xinput1_4 could not load LumaCore.dll from Steam root.\n");
+    return 0;
 }
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD dwReason, PVOID pvReserved)
@@ -187,14 +218,21 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD dwReason, PVOID pvReserved)
     {
     case DLL_PROCESS_ATTACH:
         DisableThreadLibraryCalls(hModule);
-        LoadRealXInput();
-        if (!LumaCoreLoad())
-            return FALSE;
+        // Real XInput resolves lazily via EnsureLoaded() on the first export
+        // call (already outside DllMain in normal operation). Only the
+        // bootstrap worker starts here - no waits, no I/O, no LoadLibrary.
+        {
+            HANDLE thread = CreateThread(nullptr, 0, LoadCoreWorker, hModule, 0, nullptr);
+            if (thread)
+                CloseHandle(thread);
+            else
+                OutputDebugStringW(L"[LumaCore] xinput1_4 could not start the bootstrap thread.\n");
+        }
         break;
     case DLL_THREAD_ATTACH:
     case DLL_THREAD_DETACH:
     case DLL_PROCESS_DETACH:
         break;
     }
-    return TRUE;
+    return TRUE;  // A missing LumaCore.dll must not break Steam's load.
 }

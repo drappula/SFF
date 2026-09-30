@@ -351,9 +351,9 @@ namespace IpcSpecLoader {
             errorOut.clear();
             const std::string path = "steamclientipc/" + sha + ".toml";
             const std::string rawUrl =
-                "https://raw.githubusercontent.com/KoriaPolis/Steam-Auto-PT/pattern/" + path;
+                "https://raw.githubusercontent.com/michelegoku3/MigoReleases/pattern/" + path;
             const std::string cdnUrl =
-                "https://cdn.jsdelivr.net/gh/KoriaPolis/Steam-Auto-PT@pattern/" + path;
+                "https://cdn.jsdelivr.net/gh/michelegoku3/MigoReleases@pattern/" + path;
             const std::string gfUrl =
                 "https://gitflic.ru/api/project/midrags/steam-auto-pt/blob?branch=pattern&file=" + path;
 

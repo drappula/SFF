@@ -21,6 +21,37 @@ include(LcProtobuf)
 include(LcTomlplusplus)
 include(LcLogMacros)
 
+# protobuf may already have supplied its runtime targets without exposing the
+# executable target under the unqualified name "protoc". Resolve the compiler
+# independently so code generation works with either the locally built target
+# or a package-provided protobuf::protoc / protoc executable.
+if(TARGET protoc)
+    set(LUMACORE_PROTOC_COMMAND "$<TARGET_FILE:protoc>")
+    set(LUMACORE_PROTOC_DEPENDENCY protoc)
+elseif(TARGET protobuf::protoc)
+    set(LUMACORE_PROTOC_COMMAND "$<TARGET_FILE:protobuf::protoc>")
+    set(LUMACORE_PROTOC_DEPENDENCY protobuf::protoc)
+else()
+    if(DEFINED Protobuf_PROTOC_EXECUTABLE AND EXISTS "${Protobuf_PROTOC_EXECUTABLE}")
+        set(_LUMACORE_PROTOC_EXE "${Protobuf_PROTOC_EXECUTABLE}")
+    elseif(DEFINED protobuf_PROTOC_EXE AND EXISTS "${protobuf_PROTOC_EXE}")
+        set(_LUMACORE_PROTOC_EXE "${protobuf_PROTOC_EXE}")
+    else()
+        find_program(_LUMACORE_PROTOC_EXE NAMES protoc protoc.exe)
+    endif()
+
+    if(NOT _LUMACORE_PROTOC_EXE)
+        message(FATAL_ERROR
+            "Protobuf runtime targets were found, but no protoc compiler is available. "
+            "Install a protoc executable compatible with the protobuf runtime or "
+            "remove the external protobuf targets so LcProtobuf can build its pinned protoc.")
+    endif()
+
+    set(LUMACORE_PROTOC_COMMAND "${_LUMACORE_PROTOC_EXE}")
+    set(LUMACORE_PROTOC_DEPENDENCY "${_LUMACORE_PROTOC_EXE}")
+    message(STATUS "LumaCore protobuf compiler: ${_LUMACORE_PROTOC_EXE}")
+endif()
+
 set(PROTO_SRC "${CMAKE_CURRENT_SOURCE_DIR}/proto/steam_messages.proto")
 set(PROTO_GEN_DIR       "${CMAKE_CURRENT_BINARY_DIR}/proto")
 set(PROTO_GEN_LITE_DIR  "${CMAKE_CURRENT_BINARY_DIR}/proto_lite")
@@ -29,11 +60,11 @@ add_custom_command(
     OUTPUT "${PROTO_GEN_DIR}/steam_messages.pb.cc"
            "${PROTO_GEN_DIR}/steam_messages.pb.h"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${PROTO_GEN_DIR}"
-    COMMAND $<TARGET_FILE:protoc>
+    COMMAND "${LUMACORE_PROTOC_COMMAND}"
         "--cpp_out=${PROTO_GEN_DIR}"
         "-I${CMAKE_CURRENT_SOURCE_DIR}/proto"
         "${PROTO_SRC}"
-    DEPENDS "${PROTO_SRC}" protoc
+    DEPENDS "${PROTO_SRC}" ${LUMACORE_PROTOC_DEPENDENCY}
     COMMENT "Generating protobuf full-Message sources (Debug)"
 )
 
@@ -41,11 +72,11 @@ add_custom_command(
     OUTPUT "${PROTO_GEN_LITE_DIR}/steam_messages.pb.cc"
            "${PROTO_GEN_LITE_DIR}/steam_messages.pb.h"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${PROTO_GEN_LITE_DIR}"
-    COMMAND $<TARGET_FILE:protoc>
+    COMMAND "${LUMACORE_PROTOC_COMMAND}"
         "--cpp_out=lite:${PROTO_GEN_LITE_DIR}"
         "-I${CMAKE_CURRENT_SOURCE_DIR}/proto"
         "${PROTO_SRC}"
-    DEPENDS "${PROTO_SRC}" protoc
+    DEPENDS "${PROTO_SRC}" ${LUMACORE_PROTOC_DEPENDENCY}
     COMMENT "Generating protobuf lite-MessageLite sources (Release)"
 )
 
