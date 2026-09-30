@@ -104,14 +104,6 @@ window.App = (function() {
                 }
                 if (_currentPage === 'home') _refreshHomeLumacoreNotice();
 
-                // SteamOS-only: Patch Gaming Mode button on the Linux Tools page
-                if (_platform !== 'win32') {
-                    Bridge.callSync('is_steamos', function(val) {
-                        var btn = document.getElementById('gaming-mode-patch-btn');
-                        if (btn && val) btn.style.display = '';
-                    });
-                }
-
                 // Linux first-launch guide popup (SteamOS/Steam Deck users)
                 if (_platform !== 'win32') {
                     Bridge.callWithCallback('get_setting', 'linux_guide_shown', function(val) {

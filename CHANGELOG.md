@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- **Patch Gaming Mode shows on all Linux** — the button stayed hidden unless `is_steamos` returned true, so CachyOS/ROG Ally never saw it. The gate is gone; the button always shows on Linux.
 - **Depot picker showed the game name for every depot** — unnamed depots fell back to the game name plus OS, so all rows looked identical. Unnamed depots now show `Depot <id>`, named depots show `Name (<id>)`.
 - **Assassin's Creed and other old depots failed on the built-in downloader** — those depots store chunks as ZIP (`PK\x03\x04`), but the chunk handler only accepted `VZa`/`VSZa` and dropped the chunk. ZIP chunks now unzip and verify correctly.
 - **Depot file list required a Hubcap key** — the explorer only tried Hubcap on-demand when no local manifest was cached, so users without a Hubcap key always hit the "start a download first" error. It now tries LuasTools and the GitHub mirrors first, then Hubcap as fallback.
