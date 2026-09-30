@@ -161,9 +161,9 @@ namespace IpcLoader {
         }
 
         bool FetchFromNetwork(const std::string& sha, std::string& bodyOut) {
-            const std::string ghUrl = "https://raw.githubusercontent.com/KoriaPolis/Steam-Auto-PT/pattern/"
+            const std::string ghUrl = "https://raw.githubusercontent.com/michelegoku3/MigoReleases/pattern/"
                                       + std::string(kIPCSubdir) + "/" + sha + ".toml";
-            const std::string cdnUrl = "https://cdn.jsdelivr.net/gh/KoriaPolis/Steam-Auto-PT@pattern/"
+            const std::string cdnUrl = "https://cdn.jsdelivr.net/gh/michelegoku3/MigoReleases@pattern/"
                                        + std::string(kIPCSubdir) + "/" + sha + ".toml";
             const std::string gfUrl = "https://gitflic.ru/api/project/midrags/steam-auto-pt/blob?branch=pattern&file="
                                       + std::string(kIPCSubdir) + "/" + sha + ".toml";

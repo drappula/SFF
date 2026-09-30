@@ -1,0 +1,51 @@
+# ============================================================
+#  LumaCore — artefatti di build
+#
+#  Percorsi relativi a questa cartella, quindi funziona
+#  indipendentemente da dove si trovi la radice del repository.
+# ============================================================
+
+# --- Output CMake / MSBuild -----------------------------------
+build/
+build_log.txt
+
+# --- Dipendenze FetchContent ---------------------------------
+# LcFetchCache.cmake pinna FETCHCONTENT_BASE_DIR su <repo>/.deps
+.deps/
+
+# --- DLL pubblicate da build.bat ------------------------------
+Releases/
+
+# --- Altri generatori / IDE ----------------------------------
+out/
+x64/
+Debug/
+Release/
+CMakeFiles/
+CMakeCache.txt
+CMakeUserPresets.json
+cmake_install.cmake
+CTestTestfile.cmake
+compile_commands.json
+
+# --- Visual Studio ---------------------------------------------
+.vs/
+*.user
+*.suo
+*.sdf
+*.opensdf
+*.VC.db
+*.VC.opendb
+*.VC.vcp
+*.pdb
+*.ilk
+*.idb
+*.exp
+*.lib
+*.obj
+*.tlog
+*.lastbuildstate
+*.log
+
+# --- Binari precompilati committati per errore -----------------
+source/*.dll

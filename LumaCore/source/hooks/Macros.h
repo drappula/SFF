@@ -11,9 +11,13 @@
 // returns nullptr, the macro logs a miss into status.json via
 // HookStatus::RecordMissed, and the install pass keeps going.
 //
-// All LM_INSTALL / LM_BIND targets resolve against diversion_hModule (the
-// hooked copy of steamclient64.dll). SteamUI hooks call ByteSearch directly
-// against hSteamUI rather than going through these macros.
+// All LM_INSTALL / LM_BIND targets resolve against diversion_hModule, which is
+// always Steam's own steamclient64.dll loaded by absolute path from the Steam
+// root. LumaCore does not copy the client and does not redirect SteamUI to a
+// second image: Steam and LumaCore must share this exact HMODULE. If they ever
+// diverge, every hook below is installed on a module nobody calls, and the
+// status file reports hook_target="steamclient64-MISMATCH".
+// SteamUI hooks call ByteSearch directly against hSteamUI instead.
 //
 // LM_INSTALL_STR / LM_BIND_STR variants iterate a StringXRefSig array of TOML
 // lookup-key candidates and use the first key that resolves.

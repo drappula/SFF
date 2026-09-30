@@ -27,9 +27,9 @@
 #include "config/Settings.h"
 
 
-// Handle to lcoverlay.dll once LoadDiversion() copies and loads it.
-// All hook targets in steamclient64.dll are resolved through this module.
-// Null until LoadDiversion() succeeds.
+// The only steamclient hook target: Steam's original root DLL. LumaCore no
+// longer creates or loads a diverted copy. Null until the original module has
+// been loaded from SteamclientPath.
 inline HMODULE diversion_hModule = nullptr;
 
 // InitThread handle retained so DLL_PROCESS_DETACH can wait for init to finish
@@ -37,14 +37,17 @@ inline HMODULE diversion_hModule = nullptr;
 inline HANDLE g_InitThread = nullptr;
 
 // Set to true by InitThread after every hook has been installed.
-// SteamUI.cpp's LoadModuleWithPath hook polls this before returning diversion_hModule
-// to the caller, so all hooks are in place before Steam starts using the module.
+// Consumed by DLL_PROCESS_DETACH to decide whether it is safe to unhook.
+// It is deliberately NOT used as a gate inside SteamUI's LoadModuleWithPath
+// hook: that wait only ever protected the removed diversion redirect.
 inline std::atomic<bool> g_HooksInstalled{false};
 
-// Runtime paths filled in by LoadDiversion() from the process working directory.
+// Runtime paths filled in by PrepareAndLoad() from LumaCore's Steam-root path.
 inline char SteamInstallPath[MAX_PATH] = {};  // Steam root: the folder containing steam.exe
+inline char SteamExePath[MAX_PATH]     = {};  // Full path of the running executable (diagnostics)
 inline char SteamclientPath[MAX_PATH] = {};  // <SteamInstallPath>\steamclient64.dll
-inline char DiversionPath[MAX_PATH]   = {};  // <SteamInstallPath>\bin\lcoverlay.dll (hooked copy)
+inline char SteamUiPath[MAX_PATH]     = {};  // <SteamInstallPath>\steamui.dll (diagnostics)
+inline char DiversionPath[MAX_PATH]   = {};  // Diagnostics alias for the original Steam DLL
 inline char LuaDir[MAX_PATH]          = {};  // <SteamInstallPath>\config\stplug-in
 inline char ConfigPath[MAX_PATH]      = {};  // <SteamInstallPath>\lumacore.toml
 inline char PayloadPath[MAX_PATH]    = {};  // <SteamInstallPath>\LumaCorePayload.dll
@@ -57,6 +60,7 @@ inline std::string g_steamBuildId;
 
 // The fake AppId substituted when -onlinefix is active (Valve's SpaceWar lobby app).
 constexpr AppId_t kOnlineFixAppId = 480;
+
 
 // Dispatches the PatternFetcher worker for steamui.dll on a detached thread.
 // Defined in entry.cpp. Idempotent: subsequent calls after the first are no-ops.

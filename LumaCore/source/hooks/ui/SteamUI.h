@@ -10,7 +10,10 @@
 #include "core/entry.h"
 
 // Hooks targeting steamui.dll:
-//   * LoadModuleWithPath  -> redirect steamclient64.dll loads to the diversion copy
+//   * LoadModuleWithPath  -> observes steamclient64.dll loads and records
+//                            whether SteamUI ended up on the same HMODULE
+//                            LumaCore hooked. It never substitutes a module:
+//                            LumaCore hooks Steam's own root DLL directly.
 //   * RemoveAppOverview   -> evict a card from the live library UI by
 //                           emitting a synthesized CAppOverview_Change to
 //                           every registered webhelper subscriber.

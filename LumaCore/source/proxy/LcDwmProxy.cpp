@@ -7,6 +7,8 @@
 
 #include <windows.h>
 #include <cstring>
+#include <string>
+#include <cwchar>
 
 
 #pragma comment(linker, "/EXPORT:DllCanUnloadNow=DWMAPI.DllCanUnloadNow,@111")
@@ -113,24 +115,44 @@
 #pragma comment(linker, "/EXPORT:#186=DWMAPI.#186,@186,NONAME")
 #pragma comment(linker, "/EXPORT:#187=DWMAPI.#187,@187,NONAME")
 
-// Only inject when the host is a known steam process.
-// LoadLibraryA guarantees that LumaCore.dll's DllMain runs at most once
-// per process, so multiple hijack DLLs can safely call this without
-// additional synchronisation.
-BOOL LumaCoreLoad()
+// Only inject when the host is steam.exe AND this proxy sits beside it,
+// and never from DllMain: the loader lock is held during DLL_PROCESS_ATTACH,
+// so the core loads from a worker thread after DllMain returns. Ported from
+// Aether's bootstrap switch (commit 14a6359). LoadLibraryA guarantees that
+// LumaCore.dll's DllMain runs at most once per process, so multiple hijack
+// DLLs can safely call this without additional synchronisation. Failures are
+// non-fatal: DllMain always returns TRUE so a missing LumaCore.dll can
+// never stop Steam from booting.
+static DWORD WINAPI LoadCoreWorker(LPVOID parameter)
 {
-    char exePath[MAX_PATH];
-    if (!GetModuleFileNameA(NULL, exePath, MAX_PATH))
-        return TRUE;
-    const char* name = strrchr(exePath, '\\');
-    name = name ? name + 1 : exePath;
-    if (_stricmp(name, "steam.exe") != 0)
-        return TRUE;
-    if (GetModuleHandleA("LumaCore.dll"))
-        return TRUE;
-    return LoadLibraryA("LumaCore.dll") != NULL;
-}
+    const HMODULE self = static_cast<HMODULE>(parameter);
 
+    wchar_t exePath[MAX_PATH] = {};
+    wchar_t proxyPath[MAX_PATH] = {};
+    const DWORD exeLen = GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+    const DWORD proxyLen = GetModuleFileNameW(self, proxyPath, MAX_PATH);
+    if (!exeLen || exeLen >= MAX_PATH || !proxyLen || proxyLen >= MAX_PATH)
+        return 0;
+
+    const wchar_t* exeSlash = std::wcsrchr(exePath, L'\\');
+    wchar_t* proxySlash = wcsrchr(proxyPath, L'\\');
+    if (!exeSlash || !proxySlash || _wcsicmp(exeSlash + 1, L"steam.exe") != 0)
+        return 0;   // not Steam - forward normally, never inject.
+
+    const size_t exeDirLen = static_cast<size_t>(exeSlash - exePath);
+    const size_t proxyDirLen = static_cast<size_t>(proxySlash - proxyPath);
+    if (exeDirLen != proxyDirLen || _wcsnicmp(exePath, proxyPath, exeDirLen) != 0)
+        return 0;   // proxy is not beside steam.exe - do not inject.
+
+    if (GetModuleHandleW(L"LumaCore.dll"))
+        return 0;   // already loaded by the other proxy.
+
+    std::wstring core(proxyPath, proxyDirLen);
+    core += L"\\LumaCore.dll";
+    if (!LoadLibraryW(core.c_str()))
+        OutputDebugStringW(L"[LumaCore] dwmapi could not load LumaCore.dll from Steam root.\n");
+    return 0;
+}
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD dwReason, PVOID pvReserved)
 {
@@ -139,8 +161,11 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD dwReason, PVOID pvReserved)
     case DLL_PROCESS_ATTACH:
         {
             DisableThreadLibraryCalls(hModule);
-            if ( !LumaCoreLoad() )
-                return FALSE;
+            HANDLE thread = CreateThread(nullptr, 0, LoadCoreWorker, hModule, 0, nullptr);
+            if (thread)
+                CloseHandle(thread);
+            else
+                OutputDebugStringW(L"[LumaCore] dwmapi could not start the bootstrap thread.\n");
             break;
         }
     case DLL_THREAD_ATTACH:
@@ -148,6 +173,5 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD dwReason, PVOID pvReserved)
     case DLL_PROCESS_DETACH:
         break;
     }
-    return TRUE;
+    return TRUE;  // A missing LumaCore.dll must not break Steam's load.
 }
-

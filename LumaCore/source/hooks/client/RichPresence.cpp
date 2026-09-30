@@ -10,6 +10,7 @@
 #include "runtime/Logger.h"
 #include "core/entry.h"
 #include "Steam/Structs.h"
+#include "Steam/NetPacketLayout.h"
 #include "steam_messages.pb.h"
 #include <cstring>
 #include <mutex>
@@ -336,6 +337,8 @@ namespace RichPresence {
     {
         if (!pPacket || !callOriginal)
             return;
+        if (!NetPkt::IsResolved())
+            return;   // layout unknown: never touch packet fields at a guessed offset
 
         uint8 staged[kPacketLimit];
         uint32 stagedLen = 0;
@@ -348,13 +351,13 @@ namespace RichPresence {
             g_staged = false;
         }
 
-        uint8* originalData = pPacket->m_pubData;
-        uint32 originalSize = pPacket->m_cubData;
-        pPacket->m_pubData = staged;
-        pPacket->m_cubData = stagedLen;
+        uint8* originalData = NetPkt::Data(pPacket);
+        uint32 originalSize = NetPkt::Size(pPacket);
+        NetPkt::Data(pPacket) = staged;
+        NetPkt::Size(pPacket) = stagedLen;
         callOriginal(pThis, pPacket);
-        pPacket->m_pubData = originalData;
-        pPacket->m_cubData = originalSize;
+        NetPkt::Data(pPacket) = originalData;
+        NetPkt::Size(pPacket) = originalSize;
         LOG_MISCCH_INFO("RichPresence: delivered staged persona packet bytes={}", stagedLen);
     }
 

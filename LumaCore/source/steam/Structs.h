@@ -228,15 +228,14 @@ struct IKeyValuesSystem {
 };
 using KeyValuesSystemSteam_t = IKeyValuesSystem* (*)();
 
-struct CNetPacket
-{
-	HCONNECTION m_hConnection;
-	uint8* m_pubData;
-	uint32 m_cubData;
-	int32 m_cRef;
-	uint8* m_pubNetworkBuffer;
-	CNetPacket* m_pNext;
-};
+// CNetPacket is intentionally opaque: its field offsets differ between Steam
+// client builds (the beta client d2d085e7+ inserted two per-packet version
+// stamps after m_hConnection, shifting m_pubData/m_cubData +8 bytes — Steam
+// crashed on boot when fields were read at the stale offsets). Reach the
+// fields through NetPkt::Data()/NetPkt::Size() from Steam/NetPacketLayout.h,
+// which detects the layout at runtime. Never declare these fields again and
+// never take sizeof(CNetPacket).
+struct CNetPacket;
 
 struct MsgHdr
 {

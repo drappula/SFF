@@ -32,7 +32,8 @@ const PatternFetcher::TomlEntry* FindEntry(
 }
 
 // Friendly basename for the miss log. The full path is noisy and a reader
-// only ever cares about steamclient64.dll vs steamui.dll vs lcoverlay.dll.
+// only ever cares about steamclient64.dll vs steamui.dll. (An older build
+// hooked a copied image named lcoverlay.dll; that path is gone.)
 std::string ModuleBasename(HMODULE module) {
     char buf[MAX_PATH] = {};
     DWORD n = GetModuleFileNameA(module, buf, MAX_PATH);
