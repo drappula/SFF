@@ -36,7 +36,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: linux-release
-          path: SteaMidra-*-linux.zip
+          path: |
+            SteaMidra-*-linux.zip
+            SteaMidra-*-x86_64.AppImage
   build-windows:
     runs-on: windows-latest
     steps:
@@ -111,6 +113,7 @@ jobs:
         with:
           files: |
             linux-release/SteaMidra-*-linux.zip
+            linux-release/SteaMidra-*-x86_64.AppImage
             windows-release/SteaMidra-*-windows.zip
             windows-setup/SteaMidra-*-Setup.exe
           draft: false
