@@ -1,0 +1,3 @@
+[submodule "LumaCore"]
+	path = LumaCore
+	url = git@github.com:drappula/LumaCore.git
