@@ -382,6 +382,20 @@ def _cleanup_headcrab_zombies():
             pass
 
 
+def _background_stdin():
+    """Stdin for headcrab children. Inherited when interactive so sudo can
+    still prompt in a terminal; DEVNULL otherwise so a prompt fails fast
+    instead of blocking forever with no one to answer."""
+    try:
+        import sys as _sys
+        if _sys.stdin.isatty():
+            return None
+    except Exception:
+        pass
+    logger.debug("headcrab stdin closed (non-interactive)")
+    return subprocess.DEVNULL
+
+
 def setup_via_headcrab(steam_path: Path, print_fn=print) -> bool:
     """Download and run headcrab.sh to install SLSsteam. Primary method."""
     if not _IS_LINUX:
@@ -413,6 +427,7 @@ def setup_via_headcrab(steam_path: Path, print_fn=print) -> bool:
         proc = subprocess.Popen(
             ["bash", str(script_path)],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            stdin=_background_stdin(),
             text=True, env=env, cwd=str(script_path.parent),
         )
         for line in proc.stdout:
@@ -485,6 +500,7 @@ def fix_hash_mismatch(steam_path: Path, print_fn=print) -> bool:
         proc = subprocess.run(
             ["bash", "-c", f"curl -fsSL {_HEADCRAB_RESET_URL} | bash"],
             capture_output=True, text=True, timeout=120, env=env,
+            stdin=_background_stdin(),
         )
         if proc.stdout:
             for line in proc.stdout.splitlines():
@@ -528,6 +544,7 @@ def fix_hash_mismatch(steam_path: Path, print_fn=print) -> bool:
         proc = subprocess.run(
             ["bash", "-c", f"curl -fsSL {_HEADCRAB_PATCH_URL} | bash"],
             capture_output=True, text=True, timeout=120, env=env,
+            stdin=_background_stdin(),
         )
         if proc.stdout:
             for line in proc.stdout.splitlines():

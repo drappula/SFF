@@ -529,10 +529,21 @@ def main():
             except Exception:
                 pass
 
-        QTimer.singleShot(0, _run_slssteam_update_check)
+        # Headcrab installs take minutes and prompt on stdin; running them
+        # in the timer slot froze the window. Same daemon-thread pattern
+        # as the .NET bootstrap below.
+        def _kick_slssteam_update_check():
+            import threading as _t
+            _t.Thread(
+                target=_run_slssteam_update_check,
+                name="sff-slssteam-update-check",
+                daemon=True,
+            ).start()
+
+        QTimer.singleShot(0, _kick_slssteam_update_check)
         _slssteam_timer = QTimer(app)
         _slssteam_timer.setInterval(60 * 60 * 1000)
-        _slssteam_timer.timeout.connect(_run_slssteam_update_check)
+        _slssteam_timer.timeout.connect(_kick_slssteam_update_check)
         _slssteam_timer.start()
         app._slssteam_update_timer = _slssteam_timer
 
