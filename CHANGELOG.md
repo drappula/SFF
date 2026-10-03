@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- **Window responds immediately at startup** — the update check hit the GitHub API on the GUI thread, freezing the window until it answered. The check now runs on a background thread and only the dialog comes back to the GUI.
 - **Startup no longer hangs on SLSsteam install** — the boot update check ran the multi-minute headcrab installer on the GUI thread with stdin inherited, so a sudo prompt froze the window forever. The check now runs on a background thread and headcrab gets DEVNULL stdin unless launched from a terminal.
 - **Patch Gaming Mode shows on all Linux** — the button stayed hidden unless `is_steamos` returned true, so CachyOS/ROG Ally never saw it. The gate is gone; the button always shows on Linux.
 - **Depot picker showed the game name for every depot** — unnamed depots fell back to the game name plus OS, so all rows looked identical. Unnamed depots now show `Depot <id>`, named depots show `Name (<id>)`.

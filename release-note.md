@@ -3,6 +3,7 @@
 ### Fixed
 
 * SteaMidra no longer hangs on startup when it needs to install or update SLSsteam. The install runs in the background instead of freezing the window.
+* The window responds immediately at startup — the update check no longer freezes it while waiting on GitHub.
 * The Patch Gaming Mode button now shows on all Linux systems, not just SteamOS, so CachyOS, ROG Ally and similar handhelds can use it.
 * Unnamed depots in the picker show `Depot <id>` instead of repeating the game name on every row.
 * Old depots that store chunks as ZIP (Assassin's Creed and others) now download correctly on the built-in downloader.
