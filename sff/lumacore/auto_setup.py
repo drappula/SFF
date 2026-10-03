@@ -22,7 +22,7 @@ from typing import Optional
 
 import httpx
 
-_LUMACORE_GITHUB_REPO = "KoriaPolis/LumaCore"
+_LUMACORE_GITHUB_REPO = "drappula/LumaCore"
 _LUMACORE_RELEASE_API = f"https://api.github.com/repos/{_LUMACORE_GITHUB_REPO}/releases/latest"
 
 logger = logging.getLogger(__name__)

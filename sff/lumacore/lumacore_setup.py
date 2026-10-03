@@ -122,7 +122,7 @@ def _extract_dlls_via_subprocess(
             _progress(f"Installed {dll}", callback)
     return True
 
-_LUMACORE_GITHUB_REPO = "KoriaPolis/LumaCore"
+_LUMACORE_GITHUB_REPO = "drappula/LumaCore"
 _LUMACORE_RELEASE_API = f"https://api.github.com/repos/{_LUMACORE_GITHUB_REPO}/releases/latest"
 
 _LC_DLLS = ("dwmapi.dll", "xinput1_4.dll", "LumaCore.dll", "LumaCorePayload.dll")
@@ -624,7 +624,7 @@ def install_lumacore(
 # LumaCore version checker
 # ─────────────────────────────────────────────────────────────────────────
 #
-# Releases on github.com/KoriaPolis/LumaCore are tagged like "V4", "V5", etc.
+# Releases on github.com/drappula/LumaCore are tagged like "V37", "V38", etc.
 # The release name is "LumaCore V4". We compare the latest tag from GitHub
 # against the value cached in settings under LUMACORE_INSTALLED_VERSION and
 # treat a mismatch as "update available".

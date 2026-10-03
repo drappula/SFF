@@ -15,6 +15,7 @@
 
 ### Changed
 
+- **LumaCore downloads come from drappula/LumaCore** — installs and update checks hit the new repo (V37+) instead of the inactive upstream. Versioning continues above upstream's V36 so existing installs update forward.
 - **Manifests prefer LuasTools** — `https://manifest.luastools.xyz/m/<depot>/<manifest>` is now first for game and workshop manifest fetches, before GitHub and ManifestHub. Workshop adds use the same path.
 - **Expired-key dialog can now remove the key** — the Hubcap/Ryuu/DepotBox invalid-key popup has a red `Remove Key` button that clears the saved key and its rejected flag so the provider falls back to Free Providers.
 
