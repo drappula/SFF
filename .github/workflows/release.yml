@@ -119,3 +119,25 @@ jobs:
           draft: false
           prerelease: false
           body_path: release-note.md
+      - name: Label release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ github.ref_name }}"
+          label_for() {
+            case "$1" in
+              *-linux.zip) echo "[Linux] ZIP" ;;
+              *-windows.zip) echo "[Windows] ZIP" ;;
+              *-Setup.exe) echo "[Windows] Setup.exe" ;;
+              *-x86_64.AppImage) echo "[Linux] AppImage" ;;
+            esac
+          }
+          gh api "repos/${{ github.repository }}/releases/tags/$tag" \
+            --jq '.assets[] | "\(.id) \(.name)"' | while read -r id name; do
+            label=$(label_for "$name")
+            if [ -n "$label" ]; then
+              gh api --method PATCH \
+                "repos/${{ github.repository }}/releases/assets/$id" \
+                -f label="$label" --jq '"\(.name) -> \(.label)"'
+            fi
+          done
