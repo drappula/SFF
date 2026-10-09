@@ -185,9 +185,9 @@ You can delete `api_cache.json` — SteaMidra will create a new one when needed.
 If Steam shows a purchase error or game ownership is not being spoofed, LumaCore may not be loaded.
 
 **Steps:**
-1. Run **Auto LC Setup** from the Home tab to ensure `dwmapi.dll` and `LumaCore.dll` are in your Steam folder.
+1. Run **Auto LC Setup** from the Home tab to ensure `xinput1_4.dll` and `LumaCore.dll` are in your Steam folder.
 2. Close Steam completely (check the system tray).
-3. Launch `steam.exe` normally — `dwmapi.dll` is a proxy DLL so it loads automatically.
+3. Launch `steam.exe` normally — `xinput1_4.dll` is a proxy DLL so it loads automatically.
 4. If the issue persists, check `lumacore\lumacore.log` for hook installation errors.
 
 ---

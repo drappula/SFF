@@ -139,8 +139,8 @@ def _bridge_show_linux_fastest_workflow_notice(bridge, app_id):
     bridge.download_progress.emit(json.dumps({
         "app_id": app_id,
         "status": (
-            "ACF and library entry written. Open Steam, find the game, "
-            "click Update — SLSSteam pulls the content directly."
+            "ACF and library entry written. Content downloads through SteaMidra — "
+            "do not press Update in Steam; its updater deletes these game files."
         ),
         "progress": -1,
         "info": True,
@@ -680,6 +680,13 @@ def _bridge_run_linux_ddmod_fallback(bridge, app_id, manifest_override, lib_path
                 patch_slssteam_config(detect_steam_type(), lambda _: None)
             except Exception:
                 pass
+            try:
+                from sff.linux.install_guard import pin_manifest_ids
+                _sls_cfg = getattr(getattr(bridge._ui, "sls_man", None), "sls_config_path", None)
+                if _sls_cfg is not None:
+                    pin_manifest_ids(_sls_cfg, manifest_override or {})
+            except Exception as exc:
+                logger.debug("Linux DDMod fallback: ManifestIds pin failed: %s", exc)
             bridge.download_progress.emit(json.dumps({
                 "app_id": str(app_id), "status": "Complete", "progress": 100
             }))

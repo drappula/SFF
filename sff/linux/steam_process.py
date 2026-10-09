@@ -165,6 +165,22 @@ def start_steam(print_fn=print, steam_path: str | Path | None = None) -> str:
 
     global _slssteam_so_path_cache, _library_inject_so_path_cache
 
+    try:
+        from sff.linux.install_guard import scan_broken_installs
+        _broken = scan_broken_installs(steam_path) if steam_path else []
+        for _entry in _broken:
+            print_fn(
+                Fore.YELLOW
+                + f"App {_entry['appid']} would be wiped by a Steam Update "
+                + f"({'; '.join(_entry['problems'])}). "
+                + "Re-download it through SteaMidra and do not press Update in Steam."
+                + Style.RESET_ALL
+            )
+        if _broken:
+            logger.debug("start_steam: %d install(s) would not survive a Steam Update", len(_broken))
+    except Exception as exc:
+        logger.debug("start_steam: broken-install scan failed: %s", exc)
+
     # Resolve SLSteam.so path
     slssteam_path = _slssteam_so_path_cache
     if not slssteam_path or not os.path.exists(slssteam_path):

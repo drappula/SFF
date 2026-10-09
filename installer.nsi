@@ -240,9 +240,10 @@ try_hkcu_steam:
     StrCmp $0 "" done_clean_dlls ask_clean_dlls
 ask_clean_dlls:
     IfFileExists "$0\steam.exe" 0 try_steamapps
-    MessageBox MB_YESNO "Remove LumaCore files from Steam folder ($0)?$\nThis will delete:$\n  - LumaCore.dll$\n  - LumaCorePayload.dll$\n  - dwmapi.dll$\n  - xinput1_4.dll$\n  - version.dll$\n  - bin\lcoverlay.dll$\n$\nSelect Yes to clean these files." IDNO done_clean_dlls
+    MessageBox MB_YESNO "Remove LumaCore files from Steam folder ($0)?$\nThis will delete:$\n  - LumaCore.dll$\n  - LumaCorePayload.dll$\n  - xinput1_4.dll$\n  - dwmapi.dll (legacy)$\n  - version.dll$\n  - bin\lcoverlay.dll$\n$\nSelect Yes to clean these files." IDNO done_clean_dlls
     Delete "$0\LumaCore.dll"
     Delete "$0\LumaCorePayload.dll"
+    ; legacy dwmapi proxy — removed when found, never installed
     Delete "$0\dwmapi.dll"
     Delete "$0\xinput1_4.dll"
     Delete "$0\version.dll"
@@ -256,6 +257,7 @@ try_steamapps:
     MessageBox MB_YESNO "Remove LumaCore files from Steam folder ($0)?$\n...$\nSelect Yes to clean." IDNO done_clean_dlls
     Delete "$0\LumaCore.dll"
     Delete "$0\LumaCorePayload.dll"
+    ; legacy dwmapi proxy — removed when found, never installed
     Delete "$0\dwmapi.dll"
     Delete "$0\xinput1_4.dll"
     Delete "$0\version.dll"
@@ -268,6 +270,7 @@ try_programfiles:
     MessageBox MB_YESNO "Remove LumaCore files from Steam folder ($0)?$\n...$\nSelect Yes to clean." IDNO done_clean_dlls
     Delete "$0\LumaCore.dll"
     Delete "$0\LumaCorePayload.dll"
+    ; legacy dwmapi proxy — removed when found, never installed
     Delete "$0\dwmapi.dll"
     Delete "$0\xinput1_4.dll"
     Delete "$0\version.dll"

@@ -3314,7 +3314,7 @@ window.App = (function() {
                 var ok = window.confirm(
                     'Deactivate LumaCore?\n\n' +
                     'Steam will be closed first. SteaMidra will then remove ' +
-                    'LumaCore.dll, dwmapi.dll, and bin/lcoverlay.dll. ' +
+                    'LumaCore.dll, xinput1_4.dll, and bin/lcoverlay.dll. ' +
                     'Make sure no Steam process is open before continuing.'
                 );
                 if (!ok) return;

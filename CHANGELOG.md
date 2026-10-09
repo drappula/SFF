@@ -1,5 +1,15 @@
 # Changelog
 
+## 6.9.1
+
+### Changed
+
+- **LumaCore no longer uses dwmapi.dll** — installs and version checks cover `xinput1_4.dll`, `LumaCore.dll`, and `LumaCorePayload.dll` only. A leftover `dwmapi.dll` gets deleted during install and deactivation, and the archive member is skipped when present.
+
+### Fixed
+
+- **Steam can no longer wipe Linux installs on Update** — the ACF now lists only depots with manifests on disk, downloaded builds get pinned in SLSsteam ManifestIds, outdated source builds warn before Steam offers its own Update, and starting Steam lists installs that would not survive an Update click.
+
 ## 6.9.0
 
 ### Fixed

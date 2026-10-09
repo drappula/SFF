@@ -1213,7 +1213,7 @@ def _bridge_lumacore_check_update(bridge, _arg=""):
         })
 
 def _bridge_lumacore_deactivate(bridge):
-    """Close Steam, remove LumaCore + dwmapi + lcoverlay DLLs, clear the
+    """Close Steam, remove LumaCore + xinput1_4 + lcoverlay DLLs (plus legacy dwmapi), clear the
     installed-version cache. Emits lc_progress for each step and
     task_finished{auto_lc_deactivate} when done.
     """

@@ -125,7 +125,7 @@ def _extract_dlls_via_subprocess(
 _LUMACORE_GITHUB_REPO = "drappula/LumaCore"
 _LUMACORE_RELEASE_API = f"https://api.github.com/repos/{_LUMACORE_GITHUB_REPO}/releases/latest"
 
-_LC_DLLS = ("dwmapi.dll", "xinput1_4.dll", "LumaCore.dll", "LumaCorePayload.dll")
+_LC_DLLS = ("xinput1_4.dll", "LumaCore.dll", "LumaCorePayload.dll")
 
 _GL_MARKER = ".steamidra_gl_cleaned"
 _LEGACY_MARKER_DIR = "lumacore"
@@ -153,6 +153,7 @@ _GL_ROOT_DIRS = (
 )
 
 _LC_RESET_FILES = (
+    # dwmapi.dll is legacy cleanup only: removed when found, never installed.
     ("", "dwmapi.dll"),
     ("", "xinput1_4.dll"),
     ("", "LumaCore.dll"),
@@ -375,7 +376,7 @@ def prewarm_pattern_cache_if_missing(steam_path) -> tuple[bool, int]:
     try:
         if not steam_path:
             return True, 0
-        if not (steam_path / "LumaCore.dll").is_file() and not (steam_path / "dwmapi.dll").is_file():
+        if not (steam_path / "LumaCore.dll").is_file() and not (steam_path / "xinput1_4.dll").is_file():
             return True, 0
         return _prewarm_lumacore_patterns(steam_path, None)
     except Exception as exc:
@@ -461,6 +462,8 @@ def _extract_zip(archive: Path, steam_path: Path,
                     _progress(f"Permission denied writing {dll} — Steam may be running. Close Steam completely and try again.", callback)
                     return False
                 _progress(f"Installed {dll}", callback)
+            if _dll_name_match(names, "dwmapi.dll") is not None:
+                logger.debug("Skipping legacy dwmapi.dll in archive; xinput1_4.dll is the only proxy.")
         return True
     except Exception as exc:
         logger.error("ZIP extraction failed: %s — trying external tool", exc)
@@ -485,6 +488,8 @@ def _extract_rar(archive: Path, steam_path: Path,
                     _progress(f"Permission denied writing {dll} — Steam may be running. Close Steam completely and try again.", callback)
                     return False
                 _progress(f"Installed {dll}", callback)
+            if _dll_name_match(names, "dwmapi.dll") is not None:
+                logger.debug("Skipping legacy dwmapi.dll in archive; xinput1_4.dll is the only proxy.")
         return True
     except Exception as exc:
         logger.error("RAR extraction failed: %s — trying external tool", exc)
@@ -795,7 +800,7 @@ _LC_REMOVE_PROCESSES = ("steam.exe", "steamservice.exe", "steamwebhelper.exe")
 
 def _force_close_steam(progress_callback: Optional[Callable[[str], None]] = None) -> None:
     """Kill every Steam-side process that would hold a handle on LumaCore.dll
-    or dwmapi.dll. Best-effort — caller still surfaces success/failure based
+    or xinput1_4.dll. Best-effort — caller still surfaces success/failure based
     on whether the unlink afterwards works.
     """
     import sys
@@ -841,9 +846,9 @@ def deactivate_lumacore(
     steam_path: Path,
     progress_callback: Optional[Callable[[str], None]] = None,
 ) -> tuple[bool, str]:
-    """Close Steam, delete LumaCore.dll / dwmapi.dll / lcoverlay.dll, clear
-    the installed-version setting. Idempotent — running twice on a clean
-    install reports "nothing to remove" instead of failing.
+    """Close Steam, delete LumaCore.dll / xinput1_4.dll / lcoverlay.dll plus
+    legacy dwmapi.dll, clear the installed-version setting. Idempotent — running
+    twice on a clean install reports "nothing to remove" instead of failing.
 
     Returns (ok, message). ok is True when no DLL remains on disk after the
     sweep (whether anything was deleted or not).

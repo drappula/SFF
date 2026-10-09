@@ -5,7 +5,7 @@ SteaMidra helps you set up games to work with Steam using Lua scripts, manifests
 **What you need before using SteaMidra**
 
 - Steam installed.  
-- LumaCore — SteaMidra copies `dwmapi.dll` + `LumaCore.dll` into your Steam folder via **Auto LC Setup** (Home tab). See the [Setup Guide](SETUP_GUIDE.md) for details.  
+- LumaCore — SteaMidra copies `xinput1_4.dll` + `LumaCore.dll` + `LumaCorePayload.dll` into your Steam folder via **Auto LC Setup** (Home tab). See the [Setup Guide](SETUP_GUIDE.md) for details.  
 - A Lua file for the game (or use SteaMidra to download one).  
 
 **Quick start**

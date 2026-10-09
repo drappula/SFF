@@ -1043,8 +1043,8 @@ class UI:
                     from sff.linux.yaml_config import add_manifest_id
                     for _did, _mid in manifest_override.items():
                         add_manifest_id(self.sls_man.sls_config_path, str(_did), str(_mid))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("process_from_store: ManifestIds pin failed: %s", exc)
             try:
                 from sff.linux.slssteam import detect_steam_type, patch_slssteam_config
                 patch_slssteam_config(detect_steam_type(), print)
@@ -1067,6 +1067,7 @@ class UI:
                 if pinned:
                     print(Fore.GREEN + f"Pinned {len(manifest_override)} older manifest(s) into lua" + Style.RESET_ALL)
             except Exception as _pe:
+                logger.debug("process_from_store: manifest pin into lua failed: %s", _pe)
                 print(Fore.YELLOW + f"Could not pin manifest IDs into lua: {_pe}" + Style.RESET_ALL)
         from sff.game.auto_update_defaults import steam_game_has_pins, apply_new_game_update_default
         _auto_update_was_registered = steam_game_has_pins(self.steam_path, parsed_lua.app_id)
@@ -1162,6 +1163,7 @@ class UI:
         buildid = "0"
         all_depots = {}
         acf_manifest_map = dict(manifest_override)
+        _live_bid = ""
         if build_id_override and str(build_id_override).strip().isdigit():
             # The picker knows which build the chosen manifests belong to.
             # The Steam API only reports the live public branch, which for
@@ -1182,6 +1184,8 @@ class UI:
                 print(Fore.GREEN + f"Resolved buildid: {buildid}" + Style.RESET_ALL)
             elif not bid and buildid == "0":
                 print(Fore.YELLOW + "Could not resolve buildid from Steam API — using 0" + Style.RESET_ALL)
+            if bid:
+                _live_bid = str(bid)
             all_depots = app_data.get("depots", {})
             # Only fill in manifest GIDs that weren't resolved during the
             # download phase (e.g. redist depots). Never overwrite the
@@ -1198,11 +1202,46 @@ class UI:
                     acf_manifest_map[depot_id] = str(latest_gid)
         except Exception as exc:
             print(Fore.YELLOW + f"Warning: Failed to fetch buildid/latest manifest GIDs: {exc}" + Style.RESET_ALL)
+        if sys.platform != "win32":
+            from sff.linux.install_guard import (
+                filter_manifest_map_to_downloaded,
+                pin_manifest_ids,
+                warn_if_outdated,
+            )
+            if _live_bid:
+                warn_if_outdated(buildid, _live_bid, print_fn=print_fn)
+            filtered = filter_manifest_map_to_downloaded(acf_manifest_map, self.steam_path)
+            dropped = set(acf_manifest_map) - set(filtered)
+            if dropped:
+                logger.debug("process_from_store: ACF drops depots without manifests: %s", sorted(dropped))
+                print_fn(
+                    Fore.YELLOW
+                    + f"Skipped {len(dropped)} depot(s) without manifests on disk: "
+                    + ", ".join(sorted(dropped))
+                    + Style.RESET_ALL
+                )
+            acf_manifest_map = filtered
+            if manifest_override and not acf_manifest_map:
+                logger.warning(
+                    "No manifests on disk for app %s — skipping ACF write", app_id
+                )
+                print_fn(
+                    Fore.RED
+                    + "\nNo depot manifests found on disk — skipping ACF write so Steam "
+                    + "doesn't show a broken install it would wipe on Update."
+                    + Style.RESET_ALL
+                )
+                download_ok = False
         if download_ok:
             print(Fore.YELLOW + "\nACF Writing (post-download):" + Style.RESET_ALL)
             acf.write_acf_direct(parsed_lua, acf_manifest_map, size_on_disk, buildid=buildid)
             acf.patch_workshop_acf(parsed_lua)
             ensure_library_has_app(self.steam_path, lib_path, str(parsed_lua.app_id))
+            if sys.platform != "win32" and self.sls_man:
+                try:
+                    pin_manifest_ids(self.sls_man.sls_config_path, acf_manifest_map)
+                except Exception as exc:
+                    logger.debug("process_from_store: post-download ManifestIds pin failed: %s", exc)
         else:
             print(
                 Fore.RED

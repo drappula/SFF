@@ -4,7 +4,7 @@ SteaMidra runs natively on Linux but the architecture differs from Windows. This
 
 ## TL;DR
 
-- **LumaCore is Windows-only.** It is a Steam-client DLL hijack via `dwmapi.dll`. There is no Linux equivalent shipping today.
+- **LumaCore is Windows-only.** It is a Steam-client DLL hijack via `xinput1_4.dll`. There is no Linux equivalent shipping today.
 - On Linux SteaMidra uses **SLSsteam** for license/family-share injection and **SLScheevo** for achievements. Both run as a `LD_AUDIT`-style injection into the Steam process.
 - Manifests, depot keys, ACF writing, depot decryption, and the rest of the SteaMidra pipeline work the same as Windows.
 - The Auto LC Setup button is hidden on Linux. Use **Quick Tools → Set up Linux tools (SLSsteam + .NET 9)** instead.
@@ -133,7 +133,7 @@ SLSsteam handles family bypass on Linux. If a friend in your Steam Family is pla
 
 | Topic | Windows | Linux |
 |---|---|---|
-| Ownership injection | LumaCore (DLL hijack via `dwmapi.dll`) | SLSsteam (`LD_AUDIT` of `SLSteam.so`) |
+| Ownership injection | LumaCore (DLL hijack via `xinput1_4.dll`) | SLSsteam (`LD_AUDIT` of `SLSteam.so`) |
 | Achievements | LumaCore (in-process protobuf rewrite) | SLScheevo (separate Steam client) |
 | Library entries | LumaCore picks them up live | SLSsteam picks them up live; Steam restart not needed |
 | ACF writes | Skipped (LumaCore handles ownership) | Required (SLSsteam reads ACFs) |
