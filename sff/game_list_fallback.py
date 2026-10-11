@@ -73,6 +73,14 @@ _dlc_name_cache = {}
 _name_cache_time = 0.0
 _name_mtime = 0.0
 
+# Precomputed search tokens per entry (appid -> tuple of normalized
+# tokens). search_games_json / search_name_fallback scan all ~200k/260k
+# entries per query variant; tokenizing every name on each scan costs
+# ~0.5s per call, so tokens are built once whenever the caches reload
+# (~90 MB for both maps — the price of sub-second searches).
+_games_tokens: dict[str, tuple] = {}
+_name_tokens: dict[str, tuple] = {}
+
 _loaded = False
 _FALLBACK_LOG_LAST = 0.0
 _LOAD_LOCK = threading.Lock()
@@ -195,6 +203,32 @@ def _normalize_name_data(data) -> dict:
     return {}
 
 
+def _rebuild_search_tokens():
+    """Rebuild per-entry search tokens from the current caches.
+
+    Called wherever _games_cache / _name_cache are (re)assigned, so the
+    token maps never go stale. Entries without a usable name get an
+    empty tuple and are skipped by the search loops, same as today.
+    """
+    global _games_tokens, _name_tokens
+    try:
+        _games_tokens = {
+            aid: tuple(_normalized_tokens(info.get("name", "")))
+            for aid, info in _games_cache.items()
+            if isinstance(info, dict) and info.get("name")
+        }
+    except Exception:
+        _games_tokens = {}
+    try:
+        _name_tokens = {
+            aid: tuple(_normalized_tokens(name))
+            for aid, name in _name_cache.items()
+            if isinstance(name, str) and name
+        }
+    except Exception:
+        _name_tokens = {}
+
+
 def _load_cached_games_json() -> bool:
     global _games_cache, _games_cache_time, _loaded
     for path in [d / "games.json" for d in _iter_store_metadata_dirs()]:
@@ -207,6 +241,7 @@ def _load_cached_games_json() -> bool:
             if not cleaned:
                 continue
             _games_cache = cleaned
+            _rebuild_search_tokens()
             _games_cache_time = path.stat().st_mtime
             _loaded = True
             logger.info("games.json loaded from cache: %d entries", len(_games_cache))
@@ -267,9 +302,11 @@ def _load_games_json(force=False):
             fetched = _normalize_games_data(data)
             if fetched:
                 _games_cache = _merge_preserving_rich(fetched)
+                _rebuild_search_tokens()
                 _atomic_json_write(_get_cache_dir() / "games.json", list(_games_cache.values()))
             else:
                 _games_cache = fetched
+                _rebuild_search_tokens()
             _games_cache_time = now
             _loaded = True
             logger.info("games.json fetched: %d entries", len(_games_cache))
@@ -357,6 +394,7 @@ def _load_name_cache(force=False):
             latest_mtime = max(latest_mtime, mtime)
         _name_mtime = latest_mtime
         _name_cache_time = now
+        _rebuild_search_tokens()
         if _name_cache or _dlc_name_cache:
             logger.debug(
                 "Name cache loaded: %d app/software entries, %d DLC entries",
@@ -426,6 +464,7 @@ def ensure_loaded_cached():
         _dlc_name_cache = dlc_names
         _name_mtime = latest_mtime
         _name_cache_time = time.time()
+        _rebuild_search_tokens()
     return bool(_games_cache)
 
 
@@ -508,7 +547,9 @@ def search_name_fallback(query: str, limit=500):
     for appid_str, name in _name_cache.items():
         if not name or not isinstance(name, str):
             continue
-        name_tokens = _normalized_tokens(name)
+        name_tokens = _name_tokens.get(appid_str)
+        if name_tokens is None:
+            name_tokens = _normalized_tokens(name)
         if all(t in name_tokens for t in q_tokens):
             results.append({
                 "app_id": int(appid_str) if appid_str.isdigit() else 0,
@@ -549,7 +590,9 @@ def search_games_json(query: str, limit=500):
         name = info.get("name", "")
         if not name:
             continue
-        name_tokens = _normalized_tokens(name)
+        name_tokens = _games_tokens.get(appid_str)
+        if name_tokens is None:
+            name_tokens = _normalized_tokens(name)
         if all(t in name_tokens for t in q_tokens):
             results.append({
                 "app_id": int(appid_str) if appid_str.isdigit() else 0,

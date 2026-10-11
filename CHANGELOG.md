@@ -6,6 +6,7 @@
 
 - **DDMod downloads that fetched nothing no longer report success** — DepotDownloader exits 0 even when the CDN serves no content, and a pinned manifest exempted the 0-byte failure check while DDMod's own `.DepotDownloader` bookkeeping bytes defeated the bridge-side guard. An empty install dir now fails regardless of manifest, and bookkeeping files no longer count as content, so the failure message (and a chance to pick another source) is shown instead of a false "Download complete".
 - **Native downloader rejects wrong-depot manifests with a clear error** — a mislabeled manifest in a bundle used to die in AES decrypt with "Padding is incorrect" and the reason never reached the log. The manifest's embedded depot/manifest IDs are now checked up front, key mismatches get an actionable message, and native status lines are logged instead of swallowed.
+- **Store search is ~3x faster** — every search re-normalized all ~200k catalog names plus rescanned the 200k/260k-entry JSON/name tables per query variant (~1.4s + ~0.9s/variant of pure CPU). Normalized names and search tokens are now precomputed once at load, and the scorer takes precomputed norms instead of re-normalizing. Results are byte-identical; the one-time load cost is ~1s and ~100 MB for the caches.
 
 ## 6.9.1
 
