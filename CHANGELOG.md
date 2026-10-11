@@ -5,6 +5,7 @@
 ### Fixed
 
 - **DDMod downloads that fetched nothing no longer report success** — DepotDownloader exits 0 even when the CDN serves no content, and a pinned manifest exempted the 0-byte failure check while DDMod's own `.DepotDownloader` bookkeeping bytes defeated the bridge-side guard. An empty install dir now fails regardless of manifest, and bookkeeping files no longer count as content, so the failure message (and a chance to pick another source) is shown instead of a false "Download complete".
+- **Native downloader rejects wrong-depot manifests with a clear error** — a mislabeled manifest in a bundle used to die in AES decrypt with "Padding is incorrect" and the reason never reached the log. The manifest's embedded depot/manifest IDs are now checked up front, key mismatches get an actionable message, and native status lines are logged instead of swallowed.
 
 ## 6.9.1
 
