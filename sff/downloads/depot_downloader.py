@@ -293,10 +293,13 @@ _DDMOD_PROGRESS_RE = re.compile(r"^\s*(\d{1,3}(?:\.\d+)?)%\s")
 
 
 def _calculate_dir_size(path: Path) -> int:
+    """Downloaded content only. DDMod's bookkeeping dir (.DepotDownloader)
+    is excluded: a run that fetched nothing still writes ~14 bytes of
+    depot.config there, and counting it defeats the 0-byte failure check."""
     total = 0
     try:
         for f in path.rglob("*"):
-            if f.is_file():
+            if f.is_file() and ".DepotDownloader" not in f.parts:
                 try:
                     total += f.stat().st_size
                 except OSError:
@@ -750,21 +753,23 @@ def run_download(
                     # DDMod prints "missing public subsection" and exits 0
                     # with zero bytes written (war story: app 3438850,
                     # depot 3438850, "downloaded successfully" after a 4s
-                    # no-op). A depot running with no pinned manifest can't
-                    # validate anything, so zero new bytes = delivered
-                    # nothing. With a manifest, 0 new bytes is just -validate
-                    # passing, which is a legitimate success.
+                    # no-op). Zero new bytes is only a legitimate success
+                    # when the depot was already on disk — a -validate pass
+                    # over existing content. An empty install dir can't have
+                    # validated anything, so it fails even with a pinned
+                    # manifest.
                     _after = _calculate_dir_size(download_dir)
-                    if _after == _bytes_before and not manifest_id:
+                    if _after == _bytes_before and (not manifest_id or _after == 0):
                         print_fn(
                             Fore.YELLOW
-                            + f"Depot {depot_id_str} exited cleanly but had no manifest "
-                              "and wrote 0 new bytes — treating as failed."
+                            + f"Depot {depot_id_str} exited cleanly but wrote "
+                              "0 new bytes — treating as failed."
                             + Style.RESET_ALL
                         )
                         logger.warning(
-                            "DDMod depot %s (app %s): exit 0, no manifest, 0 new bytes — marking failed",
-                            depot_id_str, appid,
+                            "DDMod depot %s (app %s): exit 0, %s bytes on disk, "
+                            "0 new bytes — marking failed",
+                            depot_id_str, appid, _after,
                         )
                         if attempt <= max_retries:
                             continue

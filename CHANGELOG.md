@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **DDMod downloads that fetched nothing no longer report success** — DepotDownloader exits 0 even when the CDN serves no content, and a pinned manifest exempted the 0-byte failure check while DDMod's own `.DepotDownloader` bookkeeping bytes defeated the bridge-side guard. An empty install dir now fails regardless of manifest, and bookkeeping files no longer count as content, so the failure message (and a chance to pick another source) is shown instead of a false "Download complete".
+
 ## 6.9.1
 
 ### Changed
