@@ -743,23 +743,48 @@ def _popular_rank(force=False):
         return _popular_ranks
 
     try:
-        request = _req.Request(
-            "https://store.steampowered.com/charts/topselling?l=english",
-            headers={"User-Agent": "SteaMidra/6.3.2"},
-        )
-        with _req.urlopen(request, timeout=20, context=_get_ssl_ctx()) as resp:
-            html = resp.read().decode("utf-8", errors="replace")
+        import json as _json
         ranks: dict[str, int] = {}
-        for appid in re.findall(r'/app/(\d+)/', html):
-            if appid not in ranks:
-                ranks[appid] = len(ranks)
+        # Steam's global top-sellers search exposes ~9000 titles, far beyond
+        # the 100-app chart page, so page through it to give the Popular tab
+        # a meaningful number of games instead of stopping after page 5-6.
+        _cap = 1000
+        _start = 0
+        while len(ranks) < _cap:
+            _url = (
+                "https://store.steampowered.com/search/results/"
+                "?query=&start={s}&count=50&dynamic_data=&sort_by=_ASC"
+                "&hwtype=0&supportedlang=english&snr=1_7_7_globaltopsellers_7"
+                "&filter=globaltopsellers&infinite=1".format(s=_start)
+            )
+            try:
+                _req2 = _req.Request(_url, headers={"User-Agent": "Mozilla/5.0"})
+                with _req.urlopen(_req2, timeout=20, context=_get_ssl_ctx()) as resp:
+                    _data = _json.loads(resp.read().decode("utf-8", errors="replace"))
+                _html = _data.get("results_html") or ""
+                _new = 0
+                for appid in re.findall(r"/app/(\d+)/", _html):
+                    if appid not in ranks:
+                        ranks[appid] = len(ranks)
+                        _new += 1
+                _total = int(_data.get("total_count") or 0)
+                if not _html or _new == 0:
+                    break
+                _start += 50
+                if _total and _start >= _total:
+                    break
+                if _start >= _cap * 2:
+                    break
+            except Exception as exc:
+                logger.debug("Popular sort: top-sellers page failed at %d: %s", _start, exc)
+                break
         if ranks:
             _popular_ranks = ranks
             _popular_rank_time = now
             _atomic_json_write(path, ranks)
-            logger.debug("Popular sort: %d ranked apps from top-selling chart", len(ranks))
+            logger.debug("Popular sort: %d ranked apps from global top sellers", len(ranks))
     except Exception as exc:
-        logger.debug("Failed to refresh top-selling chart: %s", exc)
+        logger.debug("Failed to refresh global top sellers: %s", exc)
     return _popular_ranks
 
 
@@ -835,6 +860,7 @@ def browse_games_json(offset=0, per_page=20, sort_by="updated", block_nsfw=False
         ranks = _popular_rank()
         if ranks:
             items = [i for i in items if i[0] and str(i[0]) in ranks]
+            total = len(items)
             selected = heapq.nsmallest(window, items, key=lambda it: (ranks[str(it[0])], it[0]))
         else:
             # No chart data (offline, first fetch failed): fall back to
