@@ -265,6 +265,7 @@ def _bridge_fix_game(bridge, config_json):
                 steam_id=config.get("steam_id") or "76561198001737783",
                 avatar_path=config.get("avatar_path") or None,
                 simple_settings=config.get("simple_settings", False),
+                linux_native=config.get("linux_native", False),
                 gse_auth_mode=config.get("gse_auth_mode", "anonymous"),
                 gse_username=config.get("gse_username", ""),
                 gse_password=config.get("gse_password", ""),

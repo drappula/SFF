@@ -173,6 +173,17 @@ class FixGameService:
             if log_func:
                 log_func(msg)
             logger.info(msg)
+        # Auto-detect native Linux vs Proton/Wine from the game folder contents
+        # so callers that drop or default the flag still fix the right build.
+        if sys.platform != "win32":
+            game_path = Path(game_dir)
+            if game_path.is_dir():
+                has_so = any(game_path.rglob("libsteam_api.so"))
+                has_dll = any(game_path.rglob("steam_api.dll"))
+                if has_so and not has_dll:
+                    linux_native = True
+                elif has_dll and not has_so:
+                    linux_native = False
         log(f"=== Fix Game Pipeline: App {app_id} ===")
         log(f"Game directory: {game_dir}")
         log(f"Mode: {emu_mode}")
