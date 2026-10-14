@@ -242,6 +242,11 @@ window.Store = (function() {
         if (prevBtn) prevBtn.addEventListener('click', function() { if (_page > 1) { _page--; _fetchGames(); } });
         if (nextBtn) nextBtn.addEventListener('click', function() { if (_page < _totalPages) { _page++; _fetchGames(); } });
 
+        var prevBtnTop = document.getElementById('page-prev-top');
+        var nextBtnTop = document.getElementById('page-next-top');
+        if (prevBtnTop) prevBtnTop.addEventListener('click', function() { if (_page > 1) { _page--; _fetchGames(); } });
+        if (nextBtnTop) nextBtnTop.addEventListener('click', function() { if (_page < _totalPages) { _page++; _fetchGames(); } });
+
         var updateListBtn = document.getElementById('store-update-list-btn');
         if (updateListBtn) {
             updateListBtn.addEventListener('click', function() {
@@ -497,12 +502,16 @@ window.Store = (function() {
                 if (grid) grid.innerHTML = empty;
             }
             if (pagination) pagination.classList.add('hidden');
+            var paginationTop = document.getElementById('store-pagination-top');
+            if (paginationTop) paginationTop.classList.add('hidden');
             return;
         }
 
         _renderCurrentView();
 
         if (pagination) pagination.classList.remove('hidden');
+        var paginationTop2 = document.getElementById('store-pagination-top');
+        if (paginationTop2) paginationTop2.classList.remove('hidden');
     }
 
     function _renderCurrentView() {
@@ -551,10 +560,16 @@ window.Store = (function() {
         var info = document.getElementById('page-info');
         var prevBtn = document.getElementById('page-prev');
         var nextBtn = document.getElementById('page-next');
+        var infoTop = document.getElementById('page-info-top');
+        var prevBtnTop = document.getElementById('page-prev-top');
+        var nextBtnTop = document.getElementById('page-next-top');
 
         if (info) info.textContent = 'Page ' + _page + ' of ' + _totalPages + ' (' + _total + ' games)';
+        if (infoTop) infoTop.textContent = 'Page ' + _page + ' of ' + _totalPages + ' (' + _total + ' games)';
         if (prevBtn) prevBtn.disabled = _page <= 1;
         if (nextBtn) nextBtn.disabled = _page >= _totalPages;
+        if (prevBtnTop) prevBtnTop.disabled = _page <= 1;
+        if (nextBtnTop) nextBtnTop.disabled = _page >= _totalPages;
     }
 
     function _setViewMode(mode) {

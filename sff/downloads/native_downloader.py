@@ -164,6 +164,36 @@ def _decrypt_filename(encoded: str, key: bytes) -> str:
     return (plain[:end] if end >= 0 else plain).decode("utf-8")
 
 
+def _manifest_ids(raw_manifest: bytes) -> tuple[int, int] | None:
+    """Embedded (depot_id, manifest_gid) from a manifest file, no key needed.
+
+    Returns None when the bytes don't parse as a manifest at all. Used to
+    reject a wrong-depot manifest before AES decrypt fails cryptically.
+    """
+    from steam.protobufs.content_manifest_pb2 import (  # type: ignore
+        ContentManifestMetadata,
+    )
+
+    try:
+        data = raw_manifest
+        if data[:4] == b"PK\x03\x04":
+            data = _unzip_single(data)
+        buf = io.BytesIO(data)
+
+        def _section(magic: int) -> bytes:
+            m, l = struct.unpack("<II", buf.read(8))
+            if m != magic:
+                raise ValueError(f"section magic 0x{m:08X} != 0x{magic:08X}")
+            return buf.read(l)
+
+        _section(PAYLOAD_MAGIC)
+        meta = ContentManifestMetadata()
+        meta.ParseFromString(_section(METADATA_MAGIC))
+        return int(meta.depot_id or 0), int(meta.gid_manifest or 0)
+    except Exception:
+        return None
+
+
 def decode_manifest(raw_manifest: bytes, depot_key: bytes) -> dict:
     """Decrypt and parse a depot manifest, returning a plain dict."""
     from steam.protobufs.content_manifest_pb2 import (  # type: ignore
@@ -198,6 +228,19 @@ def decode_manifest(raw_manifest: bytes, depot_key: bytes) -> dict:
     fn_encrypted = meta.filenames_encrypted
 
     mappings = []
+    # Probe-decrypt one filename up front: a manifest for the wrong depot
+    # (mislabeled bundle) or a stale key otherwise dies deep in the loop
+    # with a bare padding error. Fail here with the actual cause.
+    if fn_encrypted:
+        _probe = next((m.filename for m in payload.mappings if m.filename), "")
+        if _probe:
+            try:
+                _decrypt_filename(_probe, depot_key)
+            except Exception:
+                raise RuntimeError(
+                    "manifest filenames cannot be decrypted with this depot "
+                    "key — wrong manifest for this depot, or stale key"
+                )
     for m in payload.mappings:
         fn = m.filename or ""
         if fn_encrypted and fn:
@@ -537,6 +580,28 @@ def download_depot(
         if manifest_bytes is None or len(manifest_bytes) == 0:
             client.disconnect()
             print_fn(f"[native] Manifest download failed: {last_err}")
+            return False, 0
+
+    # ── Manifest identity: reject a wrong-depot file before decrypt ──
+    # Bundles mislabel manifests (war story: Ryuu's wagotabi zip shipped
+    # Supermarket Together's depot 2709571 manifest as 2701723). Without
+    # this, AES filename decrypt dies with "Padding is incorrect" and the
+    # real cause is invisible.
+    _ids = _manifest_ids(manifest_bytes)
+    if _ids is not None:
+        _meta_depot, _meta_gid = _ids
+        if _meta_depot and _meta_gid and (_meta_depot != depot_id or _meta_gid != manifest_gid):
+            client.disconnect()
+            print_fn(
+                f"[native] Manifest is for depot {_meta_depot} "
+                f"(manifest {_meta_gid}), not depot {depot_id} — "
+                "wrong manifest in bundle/staging, try another source"
+            )
+            logger.warning(
+                "native depot %s: manifest identity mismatch "
+                "(file holds depot %s manifest %s)",
+                depot_id, _meta_depot, _meta_gid,
+            )
             return False, 0
 
     # ── Decrypt manifest ──────────────────────────────────

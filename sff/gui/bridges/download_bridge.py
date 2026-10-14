@@ -2798,8 +2798,11 @@ def _bridge_download_game_ddmod(bridge, app_id, source, lua_path, manifest_folde
                                 pass
 
                 # Native prep has no percent yet, just refresh the status text.
+                # Log it too: this branch used to return without printing,
+                # so native failure reasons never reached debug.log.
                 if clean.startswith("[native]"):
                     _lbl = _depot_label(_cur_depot[0]) if _cur_depot[0] else "depot"
+                    logger.debug("ddmod download: %s", clean)
                     try:
                         bridge.download_progress.emit(json.dumps({
                             "app_id": app_id,

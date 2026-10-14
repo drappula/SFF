@@ -289,8 +289,17 @@ def _store_alias_score(query_norm, name_norm):
 
 
 def _store_search_score(query, name, appid=None):
-    query_norm = _normalize_for_search(query or "")
-    name_norm = _normalize_for_search(name or "")
+    return _store_search_score_normed(
+        _normalize_for_search(query or ""),
+        _normalize_for_search(name or ""),
+        appid,
+    )
+
+
+def _store_search_score_normed(query_norm, name_norm, appid=None):
+    """Score already-normalized (query, name). Same output as
+    _store_search_score for the same inputs — hot loops pass precomputed
+    norms to skip re-normalizing ~200k names per query."""
     appid_text = str(appid or "").strip()
     if not query_norm:
         return (50, name_norm, appid_text)
@@ -571,6 +580,15 @@ def _load_steam_applist():
 
     # 4. Build the merged list and cache it
     _result = list(_merged.values())
+    # Normalized names for the per-search prefilter. The prefilter checks
+    # all ~200k entries on every query, so normalizing lazily costs ~1.4s
+    # per search; one eager pass here (~1.5s, amortized over the 24h cache
+    # TTL) drops the sweep to substring ops. ~35 MB for 200k norms.
+    for _e in _result:
+        try:
+            _e["norm"] = _normalize_for_search(_e.get("name", ""))
+        except Exception:
+            _e["norm"] = ""
     if _result:
         try:
             _gs = [x.get("name", "UNKNOWN GAME") + f" [ID={x.get('appid')}]" for x in _result]
@@ -579,9 +597,6 @@ def _load_steam_applist():
                 _f.write("\n".join(_gs))
         except Exception:
             pass
-        # RAM: norm was precomputed for all 200k entries (~35 MB + CPU)
-        # but _search_steam_catalog already computes it lazily on the
-        # few hundred prefilter hits. Drop eager pass, save RAM.
         _STEAM_APPLIST_CACHE = _result
         _STEAM_APPLIST_CACHE_TIME = _now
         _result.sort(key=lambda x: x.get('appid', 0))
@@ -631,7 +646,10 @@ def _search_steam_catalog(query, offset, per_page, sort_by='updated'):
             apps = [
                 a for a in apps
                 if _prefilter_ok(a)
-                and _store_search_score(q_norm, a.get("name", ""), a.get("appid"))[0] < 99
+                and _store_search_score_normed(
+                    q_norm,
+                    a.get("norm") or _normalize_for_search(a.get("name", "")),
+                    a.get("appid"))[0] < 99
             ]
     sb = (sort_by or 'updated').lower()
     if sb == 'name_asc':
@@ -643,7 +661,11 @@ def _search_steam_catalog(query, offset, per_page, sort_by='updated'):
     elif sb == 'newest':
         apps.sort(key=lambda a: a.get('appid') or 0, reverse=True)
     if query:
-        apps.sort(key=lambda a: _store_search_score(query, a.get("name", ""), a.get("appid")))
+        _q_norm = _normalize_for_search(query)
+        apps.sort(key=lambda a: _store_search_score_normed(
+            _q_norm,
+            a.get("norm") or _normalize_for_search(a.get("name", "")),
+            a.get("appid")))
     total = len(apps)
     fetch_count = 200 if query else per_page
     page_apps = apps[offset: offset + fetch_count]
@@ -1528,9 +1550,10 @@ def _bridge_search_games(bridge, query, offset, per_page, sort_by='updated', tag
                         enrich_game_dict(g)
                         _deduped.append(g)
                     if _deduped:
-                        _deduped.sort(key=lambda g: _store_search_score(
-                            query,
-                            g.get('name', ''),
+                        _lr_norm = _normalize_for_search(query)
+                        _deduped.sort(key=lambda g: _store_search_score_normed(
+                            _lr_norm,
+                            _normalize_for_search(g.get('name', '')),
                             g.get('app_id'),
                         ))
                         result['games'] = _deduped[offset:offset + per_page]
@@ -1539,7 +1562,11 @@ def _bridge_search_games(bridge, query, offset, per_page, sort_by='updated', tag
                         result['has_fallback_data'] = True
             return result
 
-        merged.sort(key=lambda g: _store_search_score(query, g.get('name', ''), g.get('app_id')))
+        _m_norm = _normalize_for_search(query)
+        merged.sort(key=lambda g: _store_search_score_normed(
+            _m_norm,
+            g.get("norm") or _normalize_for_search(g.get('name', '')),
+            g.get('app_id')))
         total = len(merged)
         if not query and not tag:
             total = max(total, int(result.get('total') or 0))
@@ -1766,7 +1793,9 @@ def _bridge_search_games_file(bridge, query):
         bridge.update_games_file()
         return json.dumps([{"name": "Game list not found — downloading now. Please search again in a moment.", "appid": "0"}])
 
-    # Cache parsed lines in memory so subsequent searches skip file I/O
+    # Cache parsed lines in memory so subsequent searches skip file I/O.
+    # Norms are precomputed once here: the loop below scores ~200k rows
+    # per keystroke and re-normalizing each would cost ~1.4s every time.
     _cache = getattr(bridge, '_allgames_cache', None)
     if _cache is None:
         _id_re = re.compile(r"\[ID=(\d+)\]$")
@@ -1779,7 +1808,8 @@ def _bridge_search_games_file(bridge, query):
                         continue
                     m = _id_re.search(line)
                     if m:
-                        _cache.append((line[:m.start()].strip(), m.group(1)))
+                        _name = line[:m.start()].strip()
+                        _cache.append((_name, m.group(1), _normalize_for_search(_name)))
         except Exception:
             return "[]"
         bridge._allgames_cache = _cache
@@ -1787,8 +1817,8 @@ def _bridge_search_games_file(bridge, query):
     try:
         q_norm = _normalize_for_search(query)
         results = []
-        for name, appid in _cache:
-            if _matches_normalized(q_norm, _normalize_for_search(name)):
+        for name, appid, nn in _cache:
+            if _store_search_score_normed(q_norm, nn, appid)[0] < 99:
                 results.append({"name": name, "appid": appid})
             if len(results) >= 200:
                 break

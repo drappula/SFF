@@ -73,6 +73,14 @@ _dlc_name_cache = {}
 _name_cache_time = 0.0
 _name_mtime = 0.0
 
+# Precomputed search tokens per entry (appid -> tuple of normalized
+# tokens). search_games_json / search_name_fallback scan all ~200k/260k
+# entries per query variant; tokenizing every name on each scan costs
+# ~0.5s per call, so tokens are built once whenever the caches reload
+# (~90 MB for both maps — the price of sub-second searches).
+_games_tokens: dict[str, tuple] = {}
+_name_tokens: dict[str, tuple] = {}
+
 _loaded = False
 _FALLBACK_LOG_LAST = 0.0
 _LOAD_LOCK = threading.Lock()
@@ -195,6 +203,32 @@ def _normalize_name_data(data) -> dict:
     return {}
 
 
+def _rebuild_search_tokens():
+    """Rebuild per-entry search tokens from the current caches.
+
+    Called wherever _games_cache / _name_cache are (re)assigned, so the
+    token maps never go stale. Entries without a usable name get an
+    empty tuple and are skipped by the search loops, same as today.
+    """
+    global _games_tokens, _name_tokens
+    try:
+        _games_tokens = {
+            aid: tuple(_normalized_tokens(info.get("name", "")))
+            for aid, info in _games_cache.items()
+            if isinstance(info, dict) and info.get("name")
+        }
+    except Exception:
+        _games_tokens = {}
+    try:
+        _name_tokens = {
+            aid: tuple(_normalized_tokens(name))
+            for aid, name in _name_cache.items()
+            if isinstance(name, str) and name
+        }
+    except Exception:
+        _name_tokens = {}
+
+
 def _load_cached_games_json() -> bool:
     global _games_cache, _games_cache_time, _loaded
     for path in [d / "games.json" for d in _iter_store_metadata_dirs()]:
@@ -207,6 +241,7 @@ def _load_cached_games_json() -> bool:
             if not cleaned:
                 continue
             _games_cache = cleaned
+            _rebuild_search_tokens()
             _games_cache_time = path.stat().st_mtime
             _loaded = True
             logger.info("games.json loaded from cache: %d entries", len(_games_cache))
@@ -267,9 +302,11 @@ def _load_games_json(force=False):
             fetched = _normalize_games_data(data)
             if fetched:
                 _games_cache = _merge_preserving_rich(fetched)
+                _rebuild_search_tokens()
                 _atomic_json_write(_get_cache_dir() / "games.json", list(_games_cache.values()))
             else:
                 _games_cache = fetched
+                _rebuild_search_tokens()
             _games_cache_time = now
             _loaded = True
             logger.info("games.json fetched: %d entries", len(_games_cache))
@@ -357,6 +394,7 @@ def _load_name_cache(force=False):
             latest_mtime = max(latest_mtime, mtime)
         _name_mtime = latest_mtime
         _name_cache_time = now
+        _rebuild_search_tokens()
         if _name_cache or _dlc_name_cache:
             logger.debug(
                 "Name cache loaded: %d app/software entries, %d DLC entries",
@@ -426,6 +464,7 @@ def ensure_loaded_cached():
         _dlc_name_cache = dlc_names
         _name_mtime = latest_mtime
         _name_cache_time = time.time()
+        _rebuild_search_tokens()
     return bool(_games_cache)
 
 
@@ -508,7 +547,9 @@ def search_name_fallback(query: str, limit=500):
     for appid_str, name in _name_cache.items():
         if not name or not isinstance(name, str):
             continue
-        name_tokens = _normalized_tokens(name)
+        name_tokens = _name_tokens.get(appid_str)
+        if name_tokens is None:
+            name_tokens = _normalized_tokens(name)
         if all(t in name_tokens for t in q_tokens):
             results.append({
                 "app_id": int(appid_str) if appid_str.isdigit() else 0,
@@ -549,7 +590,9 @@ def search_games_json(query: str, limit=500):
         name = info.get("name", "")
         if not name:
             continue
-        name_tokens = _normalized_tokens(name)
+        name_tokens = _games_tokens.get(appid_str)
+        if name_tokens is None:
+            name_tokens = _normalized_tokens(name)
         if all(t in name_tokens for t in q_tokens):
             results.append({
                 "app_id": int(appid_str) if appid_str.isdigit() else 0,
@@ -700,23 +743,48 @@ def _popular_rank(force=False):
         return _popular_ranks
 
     try:
-        request = _req.Request(
-            "https://store.steampowered.com/charts/topselling?l=english",
-            headers={"User-Agent": "SteaMidra/6.3.2"},
-        )
-        with _req.urlopen(request, timeout=20, context=_get_ssl_ctx()) as resp:
-            html = resp.read().decode("utf-8", errors="replace")
+        import json as _json
         ranks: dict[str, int] = {}
-        for appid in re.findall(r'/app/(\d+)/', html):
-            if appid not in ranks:
-                ranks[appid] = len(ranks)
+        # Steam's global top-sellers search exposes ~9000 titles, far beyond
+        # the 100-app chart page, so page through it to give the Popular tab
+        # a meaningful number of games instead of stopping after page 5-6.
+        _cap = 1000
+        _start = 0
+        while len(ranks) < _cap:
+            _url = (
+                "https://store.steampowered.com/search/results/"
+                "?query=&start={s}&count=50&dynamic_data=&sort_by=_ASC"
+                "&hwtype=0&supportedlang=english&snr=1_7_7_globaltopsellers_7"
+                "&filter=globaltopsellers&infinite=1".format(s=_start)
+            )
+            try:
+                _req2 = _req.Request(_url, headers={"User-Agent": "Mozilla/5.0"})
+                with _req.urlopen(_req2, timeout=20, context=_get_ssl_ctx()) as resp:
+                    _data = _json.loads(resp.read().decode("utf-8", errors="replace"))
+                _html = _data.get("results_html") or ""
+                _new = 0
+                for appid in re.findall(r"/app/(\d+)/", _html):
+                    if appid not in ranks:
+                        ranks[appid] = len(ranks)
+                        _new += 1
+                _total = int(_data.get("total_count") or 0)
+                if not _html or _new == 0:
+                    break
+                _start += 50
+                if _total and _start >= _total:
+                    break
+                if _start >= _cap * 2:
+                    break
+            except Exception as exc:
+                logger.debug("Popular sort: top-sellers page failed at %d: %s", _start, exc)
+                break
         if ranks:
             _popular_ranks = ranks
             _popular_rank_time = now
             _atomic_json_write(path, ranks)
-            logger.debug("Popular sort: %d ranked apps from top-selling chart", len(ranks))
+            logger.debug("Popular sort: %d ranked apps from global top sellers", len(ranks))
     except Exception as exc:
-        logger.debug("Failed to refresh top-selling chart: %s", exc)
+        logger.debug("Failed to refresh global top sellers: %s", exc)
     return _popular_ranks
 
 
@@ -792,6 +860,7 @@ def browse_games_json(offset=0, per_page=20, sort_by="updated", block_nsfw=False
         ranks = _popular_rank()
         if ranks:
             items = [i for i in items if i[0] and str(i[0]) in ranks]
+            total = len(items)
             selected = heapq.nsmallest(window, items, key=lambda it: (ranks[str(it[0])], it[0]))
         else:
             # No chart data (offline, first fetch failed): fall back to
