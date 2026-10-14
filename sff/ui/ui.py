@@ -1441,6 +1441,7 @@ class UI:
                 shutil.rmtree(tmp_update, ignore_errors=True)
             tmp_update.mkdir(parents=True, exist_ok=True)
             with zipfile.ZipFile(update_zip) as zf:
+                from sff.zip import safe_extract_zip
                 safe_extract_zip(zf, tmp_update)
             entries = list(tmp_update.iterdir())
             if len(entries) == 1 and entries[0].is_dir():
