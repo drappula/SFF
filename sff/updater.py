@@ -18,8 +18,6 @@
 
 import asyncio
 import re
-import httpx
-import json
 
 from sff.network.http_utils import get_request
 from sff.core.strings import VERSION
@@ -81,22 +79,6 @@ class Updater:
             if release.get("draft") is True or release.get("prerelease") is True:
                 continue
             return release
-        return None
-
-    @staticmethod
-    def get_latest_prerelease():
-        url = Updater._RELEASES_URL
-        while True:
-            resp = httpx.get(url, headers=Updater._HEADERS, timeout=30.0)
-            releases = json.loads(resp.text)
-            for release in releases:
-                tag = release.get("tag_name")
-                if tag and is_newer_version(tag, VERSION) and release.get("prerelease") is True:
-                    return release
-            if "next" in resp.links:
-                url = resp.links["next"]["url"]
-            else:
-                break
         return None
 
     @staticmethod
