@@ -1,9 +1,13 @@
-## 6.9.1
+## 6.10.0-pre
+
+### Added
+
+* First-run interactive tutorial — new users get a 1-minute guided tour covering setup, the Store tab, download sources with key instructions, and the Downloads tab, using a fake demo game. Replay it from Settings.
 
 ### Fixed
 
-* Steam can no longer wipe Linux installs with its Update button — the ACF lists only depots with manifests on disk, downloaded builds get pinned in SLSsteam ManifestIds, and installs that would not survive an update are flagged at Steam start.
-
-### Changed
-
-* LumaCore no longer uses `dwmapi.dll` — installs cover `xinput1_4.dll`, `LumaCore.dll` and `LumaCorePayload.dll` only, and leftover copies are removed automatically.
+* DDMod downloads that fetched nothing no longer report success — empty install dirs fail with a real error instead of a false "Download complete".
+* Windows frozen auto-update works again — the missing `safe_extract_zip` import is fixed.
+* Fix Game picks the right Linux mode from the folder contents instead of depending on the caller.
+* Native downloader rejects wrong-depot manifests up front with a clear error instead of dying in AES decrypt.
+* Store search is ~3x faster — normalized names and search tokens are precomputed once at load.
