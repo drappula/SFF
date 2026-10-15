@@ -525,7 +525,39 @@ def main():
         def _run_slssteam_update_check():
             try:
                 from sff.linux.slssteam import check_and_notify_update
-                check_and_notify_update()
+                from sff.gui.gui_prompts import _on_gui_thread
+
+                def _ask_gui(installed, latest):
+                    # Runs on a worker thread; marshal the question to the
+                    # GUI thread. A dismissed/timeout dialog (None) declines.
+                    from PyQt6.QtWidgets import QMessageBox
+
+                    if installed:
+                        text = (
+                            f"SLSsteam update available: {installed} -> {latest}.\n\n"
+                            "Install now? This closes and relaunches Steam."
+                        )
+                    else:
+                        text = (
+                            f"SLSsteam is not installed. Install latest ({latest}) now?\n\n"
+                            "This closes and relaunches Steam."
+                        )
+
+                    def _ask():
+                        return QMessageBox.question(
+                            window,
+                            "SLSsteam update",
+                            text,
+                            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                            QMessageBox.StandardButton.Yes,
+                        )
+
+                    try:
+                        return _on_gui_thread(_ask) == QMessageBox.StandardButton.Yes
+                    except Exception:
+                        return False
+
+                check_and_notify_update(ask_fn=_ask_gui)
             except Exception:
                 pass
 

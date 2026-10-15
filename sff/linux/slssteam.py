@@ -652,16 +652,23 @@ def migrate_existing_games(print_fn=print) -> int:
     return len(found)
 
 
-def check_and_notify_update(print_fn=print) -> None:
-    """Run a background install/upgrade on Linux startup.
+def check_and_notify_update(print_fn=print, ask_fn=None) -> None:
+    """Check for SLSsteam install/updates on Linux startup.
 
     Three branches:
       1. Already up to date  -> no output.
-      2. Tracked install but newer release available -> install latest.
+      2. Tracked install but newer release available -> offer to install.
       3. Not installed yet (first run, or installed by another tool but no
-         VERSION file)  -> install latest. This is the path that fixes the
+         VERSION file)  -> offer to install. This is the path that fixes the
          common "Game injection manager not configured" message: a fresh user
          had no way to discover the manual setup menu.
+
+    ask_fn(installed, latest) -> bool: when an install is needed and ask_fn
+    is given, it is called first and the install only runs when it returns
+    True (None counts as decline, e.g. a dismissed GUI dialog). When ask_fn
+    is None the install runs immediately (legacy callers). Startup entry
+    points always pass ask_fn: installing headcrab kills and relaunches
+    Steam, so it must never happen without consent.
 
     The install runs through headcrab, which kills and relaunches Steam, so
     this stays quiet while Steam is running. Run Linux Setup after closing
@@ -687,6 +694,15 @@ def check_and_notify_update(print_fn=print) -> None:
             logger.debug("slssteam auto-install skipped: Steam is running")
             return
 
+        if needs_install and ask_fn is not None:
+            try:
+                if not ask_fn(installed, latest):
+                    logger.debug("slssteam install declined by user")
+                    return
+            except Exception:
+                logger.exception("slssteam ask_fn raised; skipping install")
+                return
+
         from pathlib import Path as _Path
         if detect_steam_type() == "flatpak":
             steam_path = _Path.home() / ".var" / "app" / "com.valvesoftware.Steam" / ".steam" / "steam"
@@ -696,7 +712,7 @@ def check_and_notify_update(print_fn=print) -> None:
         if not installed:
             print_fn(
                 Fore.CYAN
-                + f"SLSsteam not installed. Auto-installing latest ({latest})..."
+                + f"SLSsteam not installed. Installing latest ({latest})..."
                 + Style.RESET_ALL
             )
             setup_via_headcrab(steam_path, print_fn)
@@ -705,7 +721,7 @@ def check_and_notify_update(print_fn=print) -> None:
         if info.get("update_available"):
             print_fn(
                 Fore.YELLOW
-                + f"SLSsteam update available: {installed} -> {latest}. Installing automatically..."
+                + f"SLSsteam update available: {installed} -> {latest}. Installing..."
                 + Style.RESET_ALL
             )
             setup_via_headcrab(steam_path, print_fn)

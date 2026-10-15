@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **SLSsteam no longer installs without asking** — the Linux startup check used to run headcrab the moment an install or update was available, killing Steam mid-session. GUI and CLI startups now ask first.
+
 ## 6.10.0-pre
 
 ### Added

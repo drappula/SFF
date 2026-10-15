@@ -566,11 +566,23 @@ if __name__ == "__main__":
 
     logger.debug(f"Init finished in {time.time() - start_time}s")
 
-    # On Linux: silently check for SLSsteam updates and notify user
+    # On Linux: check for SLSsteam updates and offer to install
     if sys.platform == "linux":
         try:
             from sff.linux.slssteam import check_and_notify_update
-            check_and_notify_update()
+
+            def _ask_cli(installed, latest):
+                if installed:
+                    return prompt_confirm(
+                        f"SLSsteam update available: {installed} -> {latest}. Install now?",
+                        default=True,
+                    )
+                return prompt_confirm(
+                    f"SLSsteam is not installed. Install latest ({latest})?",
+                    default=True,
+                )
+
+            check_and_notify_update(ask_fn=_ask_cli)
         except Exception:
             pass
 
