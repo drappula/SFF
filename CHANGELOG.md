@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- **First-run interactive tutorial** — new users get asked if they want a 1-minute tour. It spotlights Auto LC Setup (Linux Setup on Linux), the Store tab, each download source, and the Downloads tab using a fake demo game, so no real download runs. Replay it from Settings.
+
 ### Fixed
 
 - **DDMod downloads that fetched nothing no longer report success** — DepotDownloader exits 0 even when the CDN serves no content, and a pinned manifest exempted the 0-byte failure check while DDMod's own `.DepotDownloader` bookkeeping bytes defeated the bridge-side guard. An empty install dir now fails regardless of manifest, and bookkeeping files no longer count as content, so the failure message (and a chance to pick another source) is shown instead of a false "Download complete".

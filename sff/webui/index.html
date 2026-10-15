@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SteaMidra</title>
     <link rel="stylesheet" href="css/main.css?v=668d">
+    <link rel="stylesheet" href="css/tutorial.css?v=668d">
     <link rel="stylesheet" href="css/themes.css?v=668d">
     <link rel="stylesheet" href="css/cards.css?v=668d">
     <link rel="stylesheet" href="css/animations.css?v=668d">
@@ -1153,7 +1154,10 @@ start YourGame-Shipping.exe</pre>
             <div class="settings-section">
                 <h2 class="section-title">Updates</h2>
                 <p class="setting-hint" style="margin-bottom:12px;">Current version: <strong id="settings-version-label">loading...</strong></p>
-                <button id="about-update" class="btn btn-primary" style="min-width:180px;">Check for Updates</button>
+                <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                    <button id="about-update" class="btn btn-primary" style="min-width:180px;">Check for Updates</button>
+                    <button id="settings-tutorial-replay" class="btn" data-tooltip="Replay the first-run interactive tutorial">Replay tutorial</button>
+                </div>
             </div>
 
             <div class="settings-section">
@@ -2367,6 +2371,7 @@ fi</pre>Save the file, then reopen Konsole.</li>
     <script src="js/settings.js?v=668d"></script>
     <script src="js/bulk_import.js?v=668d"></script>
     <script src="js/dlc_check.js?v=668d"></script>
+    <script src="js/tutorial.js?v=668d"></script>
     <div id="confirm-dialog" class="modal hidden">
         <div class="modal-overlay"></div>
         <div class="modal-content" style="max-width:400px;">

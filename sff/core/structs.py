@@ -432,6 +432,18 @@ class Settings(Enum):
         False,
         str,
     )
+    TUTORIAL_ASKED = SettingItem(
+        "tutorial_asked",
+        "Tutorial opt-in asked (managed automatically)",
+        False,
+        str,
+    )
+    TUTORIAL_SEEN = SettingItem(
+        "tutorial_seen",
+        "Tutorial completed or skipped (managed automatically)",
+        False,
+        str,
+    )
 
     @property
     def key_name(self):

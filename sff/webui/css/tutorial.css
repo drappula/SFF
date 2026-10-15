@@ -1,0 +1,186 @@
+/* SteaMidra Web UI — First-run Tutorial (mock tour, no backend calls) */
+
+#tutorial-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    pointer-events: none;
+}
+
+#tutorial-overlay.hidden {
+    display: none !important;
+}
+
+.tutorial-pane {
+    position: fixed;
+    background: rgba(0, 0, 0, 0.62);
+    pointer-events: auto;
+    z-index: 2000;
+}
+
+.tutorial-pane.hidden {
+    display: none !important;
+}
+
+.tutorial-spotlight {
+    /* No dimming here: the overlay leaves a hole over the target,
+       so the target renders exactly as normal. The ring is only
+       an outline drawn on top. */
+    outline: 3px solid var(--accent, #4a9eff) !important;
+    outline-offset: 3px;
+    border-radius: 8px;
+    animation: tutorial-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes tutorial-pulse {
+    0%, 100% { outline-color: rgba(74, 158, 255, 0.65); }
+    50% { outline-color: rgba(74, 158, 255, 1); }
+}
+
+#tutorial-arrow {
+    position: fixed;
+    z-index: 2006;
+    color: var(--accent, #4a9eff);
+    font-size: 28px;
+    line-height: 1;
+    pointer-events: none;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.6));
+}
+
+#tutorial-arrow.hidden {
+    display: none !important;
+}
+
+#tutorial-dialog {
+    position: fixed;
+    left: 50%;
+    bottom: 24px;
+    transform: translateX(-50%);
+    z-index: 2005;
+    width: min(560px, calc(100vw - 32px));
+    background: var(--card-bg, #1e1e1e);
+    border: 1px solid var(--accent, #4a9eff);
+    border-radius: 12px;
+    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6);
+    padding: 16px 18px;
+}
+
+#tutorial-dialog.tutorial-dialog-top {
+    top: 20px;
+    bottom: auto;
+}
+
+#tutorial-dialog.hidden {
+    display: none !important;
+}
+
+#tutorial-dialog-title {
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 6px;
+}
+
+#tutorial-dialog-body {
+    font-size: 13px;
+    line-height: 1.6;
+    opacity: 0.92;
+}
+
+#tutorial-dialog-body code {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 12px;
+}
+
+#tutorial-dialog-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 12px;
+    gap: 10px;
+}
+
+#tutorial-step-count {
+    font-size: 12px;
+    opacity: 0.65;
+    white-space: nowrap;
+}
+
+#tutorial-dialog-btns {
+    display: flex;
+    gap: 8px;
+}
+
+/* Mock game card + download row are marked DEMO so they read as fake. */
+.tutorial-demo-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 3;
+    padding: 3px 8px;
+    border-radius: 6px;
+    background: #7c4dff;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+}
+
+.tutorial-mock-cover {
+    height: 150px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 44px;
+    background: linear-gradient(135deg, #2b2b4a, #4a2b5a);
+    border-radius: 8px 8px 0 0;
+}
+
+#tutorial-download-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 2004;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#tutorial-download-modal.hidden {
+    display: none !important;
+}
+
+#tutorial-dl-nudge {
+    display: none;
+    margin-top: 8px;
+    font-size: 12px;
+    color: #f0c040;
+}
+
+#tutorial-dl-nudge.visible {
+    display: block;
+}
+
+#tutorial-mock-card {
+    position: relative;
+}
+
+#tutorial-fake-progress-track {
+    width: 100%;
+    height: 6px;
+    background: var(--border, rgba(255, 255, 255, 0.12));
+    border-radius: 3px;
+    overflow: hidden;
+    margin-top: 6px;
+}
+
+#tutorial-fake-progress-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--accent, #4a9eff);
+    transition: width 0.3s linear;
+}
+
+#tutorial-optin.hidden {
+    display: none !important;
+}
