@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- **Standalone install/uninstall scripts** — `install.sh`/`install.bat` fetch the latest GitHub release (`linux.zip`/`Setup.exe`) and run it, with a block progress bar showing MB downloaded/total and a `--pre` flag for the newest beta/prerelease. `uninstall.sh`/`uninstall.bat` ask before deleting added games and LumaCore (Windows)/SLSsteam (Linux), then remove the app, shortcuts, registry entries, and Steam-side luas/ACFs. Game detection intersects injected entries with SteaMidra's own `saved_lua` record, so legit Steam components (Linux runtimes, Proton, redistributables) are never listed.
+
 ### Fixed
 
 - **SLSsteam no longer installs without asking** — the Linux startup check used to run headcrab the moment an install or update was available, killing Steam mid-session. GUI and CLI startups now ask first.

@@ -1,4 +1,32 @@
-# SteaMidra Listed on r/FMHY [FMHY](https://fmhy.net/gaming-tools#steam-epic) and r/Piracy [Piracy](https://www.reddit.com/r/Piracy/wiki/megathread/games/#:~:text=SteaMidra)
+# SteaMidra Fork
+
+## Install
+
+Linux:
+
+```sh
+bash <(curl -fsSL https://raw.githubusercontent.com/drappula/SFF/main/scripts/install.sh)
+```
+
+Windows (cmd):
+
+```bat
+curl -fsSL -o %TEMP%\install.bat https://raw.githubusercontent.com/drappula/SFF/main/scripts/install.bat && %TEMP%\install.bat
+```
+
+## Uninstall
+
+Linux:
+
+```sh
+bash <(curl -fsSL https://raw.githubusercontent.com/drappula/SFF/main/scripts/uninstall.sh)
+```
+
+Windows (cmd):
+
+```bat
+curl -fsSL -o %TEMP%\uninstall.bat https://raw.githubusercontent.com/drappula/SFF/main/scripts/uninstall.bat && %TEMP%\uninstall.bat
+```
 
 *Made by Midrag and his brother!*
 ## Educational use only. Use at your own risk.
