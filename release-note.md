@@ -3,9 +3,11 @@
 ### Added
 
 * First-run interactive tutorial — new users get a 1-minute guided tour covering setup, the Store tab, download sources with key instructions, and the Downloads tab, using a fake demo game. Replay it from Settings.
+* Standalone install/uninstall scripts (`scripts/`) — one-line install from the latest release with a progress bar and `--pre` for beta builds; uninstallers prompt before deleting added games and LumaCore/SLSsteam, then sweep the app and its Steam-side entries.
 
 ### Fixed
 
+* SLSsteam no longer installs without asking — startup now asks first instead of running headcrab mid-session.
 * DDMod downloads that fetched nothing no longer report success — empty install dirs fail with a real error instead of a false "Download complete".
 * Windows frozen auto-update works again — the missing `safe_extract_zip` import is fixed.
 * Fix Game picks the right Linux mode from the folder contents instead of depending on the caller.
