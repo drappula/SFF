@@ -622,6 +622,27 @@ window.Tutorial = (function() {
         _clearSpotlight();
         _go(st.page);
 
+        // Reset chrome synchronously so the previous step's hole/arrow
+        // never lingers while the next page loads. Full dim until the
+        // new target is measured below.
+        var titleEarly = document.getElementById('tutorial-dialog-title');
+        var bodyEarly = document.getElementById('tutorial-dialog-body');
+        var countEarly = document.getElementById('tutorial-step-count');
+        if (titleEarly) titleEarly.textContent = st.title;
+        if (bodyEarly) bodyEarly.innerHTML = st.body;
+        _wireKeyAsk('hubcap');
+        _wireKeyAsk('ryuu');
+        if (countEarly) countEarly.textContent = (_stepIdx + 1) + ' / ' + steps.length;
+        var backEarly = document.getElementById('tutorial-back');
+        if (backEarly) backEarly.disabled = _stepIdx === 0;
+        var nextEarly = document.getElementById('tutorial-next');
+        if (nextEarly) nextEarly.textContent = _stepIdx === steps.length - 1 ? 'Finish' : 'Next';
+        var overlayEarly = document.getElementById('tutorial-overlay');
+        if (overlayEarly) overlayEarly.classList.remove('hidden');
+        var dlgEarly = document.getElementById('tutorial-dialog');
+        if (dlgEarly) dlgEarly.classList.remove('hidden');
+        _layoutOverlay(null);
+
         if (_needsMockCard(_stepIdx)) _injectMockCard();
         else if (_stepIdx < 3 || st.page !== 'store') _removeMockCard();
         if (_stepIdx >= 5 && _stepIdx <= 9) {
@@ -646,32 +667,13 @@ window.Tutorial = (function() {
             var stepsNow = _steps();
             var cur = stepsNow[_stepIdx];
             if (!cur) return;
-            var title = document.getElementById('tutorial-dialog-title');
-            var body = document.getElementById('tutorial-dialog-body');
-            var count = document.getElementById('tutorial-step-count');
-            if (title) title.textContent = cur.title;
-            if (body) body.innerHTML = cur.body;
-            _wireKeyAsk('hubcap');
-            _wireKeyAsk('ryuu');
-            if (count) count.textContent = (_stepIdx + 1) + ' / ' + stepsNow.length;
-            var backBtn = document.getElementById('tutorial-back');
-            if (backBtn) backBtn.disabled = _stepIdx === 0;
-            var nextBtn = document.getElementById('tutorial-next');
-            if (nextBtn) nextBtn.textContent = _stepIdx === stepsNow.length - 1 ? 'Finish' : 'Next';
-            var overlay = document.getElementById('tutorial-overlay');
-            if (overlay) overlay.classList.remove('hidden');
-            var dlg = document.getElementById('tutorial-dialog');
-            if (dlg) dlg.classList.remove('hidden');
             if (!cur.sel) {
-                _layoutOverlay(null);
-                var arrow = document.getElementById('tutorial-arrow');
-                if (arrow) arrow.classList.add('hidden');
+                var dlg = document.getElementById('tutorial-dialog');
                 if (dlg) dlg.classList.remove('tutorial-dialog-top');
                 return;
             }
             var el = document.querySelector(cur.sel);
             if (!el) {
-                _layoutOverlay(null);
                 return;
             }
             try { el.scrollIntoView({ block: 'center', behavior: 'auto' }); } catch (e) {}
@@ -685,8 +687,8 @@ window.Tutorial = (function() {
                 target.classList.add('tutorial-spotlight');
                 _spotEl = target;
                 _relayout();
-            }, 300);
-        }, 350);
+            }, 150);
+        }, 200);
     }
 
     function start() {
