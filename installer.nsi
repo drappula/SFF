@@ -68,6 +68,11 @@ FunctionEnd
 Section "SteaMidra (required)" SEC_MAIN
     SectionIn RO
 
+    ; Stop a running instance first — its EXE is locked and the
+    ; install would fail with "Error opening file for writing".
+    nsExec::ExecToLog 'taskkill /F /IM "${EXENAME}" /T'
+    Sleep 2000
+
     SetOutPath "$INSTDIR"
     File /r "dist\SteaMidra_GUI\*"
 
