@@ -707,9 +707,10 @@ def _appid_query_value(query):
     return aid if aid > 0 else None
 
 
-# Steam store types that install like a game: game, demo, mod, rerelease.
-# DLC, tools, video and music stay out of a direct appid lookup.
-_APPID_LOOKUP_TYPES = frozenset({0, 3, 6, 14})
+# Steam store types that install like a game: game (0), demo (1), mod (2),
+# software (6) and beta/rerelease builds (14). DLC (4), video (7), hardware
+# (10) and music (11) stay out of a direct appid lookup.
+_APPID_LOOKUP_TYPES = frozenset({0, 1, 2, 6, 14})
 # Adult content descriptors. Steam also flags violence, so the descriptor
 # list can't be read wholesale as "NSFW".
 _ADULT_DESCRIPTOR_IDS = frozenset({1, 3, 4})
