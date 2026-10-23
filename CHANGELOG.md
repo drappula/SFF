@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- **Typed app ids find unlisted components** — the Store searched only its merged app list, so an app Steam hides from search (Call of Duty: WWII - Multiplayer, 476620) showed "No games found" unless the live app-list fetch had contributed it. A query that is a plain app id now resolves through `GetItems` when no catalog row matches.
 - **Updating while SteaMidra runs no longer fails** — the installer tried to overwrite `SteaMidra_GUI.exe` while it was locked, dying with "Error opening file for writing". It now kills the running app first, like the uninstaller already did.
 
 ## 6.10.0-pre

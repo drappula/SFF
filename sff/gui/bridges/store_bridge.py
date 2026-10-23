@@ -698,6 +698,92 @@ def _search_steam_catalog(query, offset, per_page, sort_by='updated'):
     return {"games": games, "total": total, "fallback": True}
 
 
+def _appid_query_value(query):
+    """The appid a search query is asking for, or None when it isn't one."""
+    text = str(query or "").strip()
+    if not text.isascii() or not text.isdigit() or len(text) > 12:
+        return None
+    aid = int(text)
+    return aid if aid > 0 else None
+
+
+# Steam store types that install like a game: game, demo, mod, rerelease.
+# DLC, tools, video and music stay out of a direct appid lookup.
+_APPID_LOOKUP_TYPES = frozenset({0, 3, 6, 14})
+# Adult content descriptors. Steam also flags violence, so the descriptor
+# list can't be read wholesale as "NSFW".
+_ADULT_DESCRIPTOR_IDS = frozenset({1, 3, 4})
+
+
+def _resolve_store_appid(appid):
+    """One store row for an exact appid the merged catalogs don't have.
+
+    A numeric query only matches the merged app list and the mirror
+    files. Unlisted components are missing from the mirrors, so the typed
+    id finds nothing whenever the live GetAppList call didn't contribute
+    (offline, slow, or served from the 24h cache). GetItems answers for
+    the id directly (Call of Duty: WWII - Multiplayer is 476620, tagged
+    rerelease of 476600), so the app resolves anyway. Returns None when
+    Steam has no such game.
+    """
+    try:
+        aid = int(appid)
+    except (TypeError, ValueError):
+        return None
+    if aid <= 0:
+        return None
+    payload = {
+        "ids": [{"appid": aid}],
+        "context": {"language": "english", "country_code": "US"},
+        "data_request": {
+            "include_assets": True,
+            "include_platforms": True,
+            "include_content_descriptors": True,
+        },
+    }
+    try:
+        from sff.gui.web_bridge import _get_ssl_ctx
+        url = (
+            "https://api.steampowered.com/IStoreBrowseService/GetItems/v1?input_json="
+            + _urlparse.quote(json.dumps(payload, separators=(",", ":")))
+        )
+        request = _req.Request(url, headers={"User-Agent": "SteaMidra/6.10.0"})
+        with _req.urlopen(request, timeout=8, context=_get_ssl_ctx()) as resp:
+            data = json.loads(resp.read())
+    except Exception as e:
+        logger.debug("appid %s lookup failed: %s", aid, e)
+        return None
+
+    items = (data.get("response") or {}).get("store_items") or []
+    item = next((it for it in items if it.get("appid") == aid), None)
+    if not item or item.get("success") == 0 or not item.get("name"):
+        logger.debug("appid %s lookup returned no usable item", aid)
+        return None
+    type_int = item.get("type")
+    if isinstance(type_int, int) and type_int not in _APPID_LOOKUP_TYPES:
+        logger.debug("appid %s resolves to store type %s, not a game", aid, type_int)
+        return None
+
+    assets = item.get("assets") or {}
+    image_name = assets.get("header") or assets.get("main_capsule") or ""
+    descriptors = set(item.get("content_descriptorids") or [])
+    return {
+        "app_id": aid,
+        "name": str(item.get("name")),
+        "last_updated": "",
+        "status": "",
+        "size": 0,
+        "image_url": (
+            f"https://shared.steamstatic.com/store_item_assets/steam/apps/{aid}/{image_name}"
+            if image_name else ""
+        ),
+        "tags": [],
+        "drm": False,
+        "nsfw": bool(descriptors & _ADULT_DESCRIPTOR_IDS),
+        "source": "appid",
+    }
+
+
 def _fetch_steam_platforms(app_ids):
     """Look up Steam metadata for each appid via batched
     ``IStoreBrowseService/GetItems/v1`` calls.
@@ -1135,6 +1221,20 @@ def _bridge_search_games(bridge, query, offset, per_page, sort_by='updated', tag
             _ensure_fallback_loaded()
         for g in result.get('games', []) or []:
             enrich_game_dict(g)
+
+        # A typed appid must resolve even when the catalogs don't have the
+        # app. Unlisted components live only in the live GetAppList
+        # response, so an offline, slow or cached app list leaves them
+        # unfindable; GetItems answers for the id directly.
+        q_aid = _appid_query_value(query)
+        if q_aid and not offset and not any(
+            int(g.get('app_id') or 0) == q_aid for g in result.get('games') or []
+        ):
+            appid_row = _resolve_store_appid(q_aid)
+            if appid_row:
+                enrich_game_dict(appid_row)
+                result.setdefault('games', []).insert(0, appid_row)
+                result['total'] = int(result.get('total') or 0) + 1
 
         client = bridge._get_store_client()
         if not client:
