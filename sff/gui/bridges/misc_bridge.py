@@ -2521,7 +2521,6 @@ def _bridge__scan_installed_games(bridge):
     import os
     from sff.gui.web_bridge import _collect_steamidra_managed_sources
     managed_sources = _collect_steamidra_managed_sources(bridge._steam_path)
-
     libs = list(get_steam_libs(bridge._steam_path))
     if os.name == 'nt':
         from sff.disk_utils import find_steam_libraries_on_disk
@@ -2575,6 +2574,47 @@ def _bridge__scan_installed_games(bridge):
                     continue
         except OSError:
             continue
+    # --- injected but not downloaded: stplug-in / saved_lua with no ACF ---
+    try:
+        from pathlib import Path as _SP
+        # Build quick name lookup from ACF parse above is already used for installed;
+        # for not-installed we try store metadata lightly (best-effort, no IO on hot path
+        # failure). Fallback is App <id>.
+        _name_cache = {}
+        try:
+            # Prefer the already on-disk games_appid.json seed if present (bundled).
+            cand = _SP("store_metadata/games_appid.json")
+            if not cand.exists():
+                from sff.core.utils import root_folder as _rf
+                cand = _rf(outside_internal=True) / "store_metadata" / "games_appid.json"
+            if cand.exists() and cand.stat().st_size < 80_000_000:
+                import json as _js
+                with cand.open("r", encoding="utf-8", errors="ignore") as f:
+                    for entry in _js.load(f):
+                        try:
+                            _name_cache[str(entry.get("appid"))] = entry.get("name") or ""
+                        except Exception:
+                            continue
+        except Exception:
+            pass
+        for app_id, sources in managed_sources.items():
+            if app_id in seen:
+                continue
+            if _is_steam_tool_entry(app_id, ""):
+                continue
+            # No ACF => not downloaded; show as not installed but managed.
+            name = _name_cache.get(str(app_id)) or f"App {app_id}"
+            games.append({
+                "app_id": int(app_id) if str(app_id).isdigit() else 0,
+                "name": name,
+                "installed": False,
+                "path": "",
+                "steamidra_managed": True,
+                "steamidra_source": ",".join(sorted(sources)),
+            })
+            seen.add(app_id)
+    except Exception as e:
+        logger.debug("_scan_installed_games: injected tail failed: %s", e)
     games.sort(key=lambda g: g.get("name", "").lower())
     if skipped_missing_dir:
         logger.info(
@@ -2841,6 +2881,38 @@ def _bridge_delete_game(bridge, app_id, game_path, mode):
     bridge._run_async(_do, on_done=_on_done)
 
 # ── Google Drive auth ─────────────────────────────────────────
+
+
+def _bridge_open_steam_install(bridge, app_id):
+    """Open Steam install dialog for an injected but not downloaded app."""
+    app_id = str(app_id or "").strip()
+    digits = "".join(ch for ch in app_id if ch.isdigit())
+    if digits:
+        app_id = digits
+    if not app_id.isdigit():
+        logger.warning("open_steam_install: invalid app_id %r", app_id)
+        return
+    try:
+        from PyQt6.QtCore import QUrl
+        from PyQt6.QtGui import QDesktopServices
+        url = QUrl(f"steam://install/{app_id}")
+        ok = QDesktopServices.openUrl(url)
+        if ok:
+            logger.info("open_steam_install: opened steam://install/%s", app_id)
+        else:
+            logger.warning("open_steam_install: QDesktopServices failed for %s", app_id)
+        # Also emit task so JS can toast if it wants
+        try:
+            bridge._emit_task_result("open_steam_install", bool(ok), "Steam install opened" if ok else "Could not open Steam", app_id=app_id)
+        except Exception:
+            pass
+    except Exception as e:
+        logger.warning("open_steam_install failed for %r: %s", app_id, e)
+        try:
+            bridge._emit_task_result("open_steam_install", False, str(e), app_id=app_id)
+        except Exception:
+            pass
+
 
 def _bridge_dump_achievement_diagnostic(bridge):
     """A16: surface the LumaCore achievement diagnostic ring buffer.

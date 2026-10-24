@@ -86,6 +86,17 @@ window.Library = (function() {
                     var appId = btn.dataset.appid;
                     if (action === 'play') {
                         Bridge.call('launch_game', appId);
+                    } else if (action === 'download') {
+                        // Injected but not downloaded -- Steam handles the install.
+                        // Strips extension noise if a human pasted "632360.lua" etc.
+                        var dlId = String(appId || '').replace(/[^0-9]/g, '') || appId;
+                        try {
+                            var QUrl = null, QSvc = null;
+                            // Prefer the bridge if available (opens steam://install), fall back to navigation.
+                            Bridge.call('open_steam_install', dlId);
+                        } catch(e) {
+                            try { window.open('steam://install/' + dlId, '_blank'); } catch(_e) {}
+                        }
                     } else if (action === 'fix') {
                         FixGame.preSelect(appId);
                         App.navigateTo('fixgame');
@@ -291,14 +302,18 @@ window.Library = (function() {
     }
 
     function _createLibraryCard(game, index) {
-        game.installed = true;
         var card = Components.createGameCard(game, { index: index, forceShowImage: true });
         var safeName = (game.name || '').replace(/"/g, '&quot;');
         var safePath = (game.path || '').replace(/"/g, '&quot;');
+        var isInstalled = game.installed !== false;
+        if (!isInstalled) card.classList.add('not-installed');
         var actions = card.querySelector('.game-card-actions');
         if (actions) {
+            var playBtn = isInstalled
+                ? '<button class="btn btn-sm btn-primary" data-action="play" data-appid="' + game.app_id + '" data-tooltip="Launch through Steam">Play</button>'
+                : '<button class="btn btn-sm btn-primary" data-action="download" data-appid="' + game.app_id + '" data-gamename="' + safeName + '" data-tooltip="Download via Steam">Download</button>';
             actions.innerHTML =
-                '<button class="btn btn-sm btn-primary" data-action="play" data-appid="' + game.app_id + '" data-tooltip="Launch through Steam">Play</button>' +
+                playBtn +
                 '<button class="btn btn-sm" data-action="fix" data-appid="' + game.app_id + '" data-tooltip="Fix this game">Fix</button>' +
                 '<button class="btn btn-sm" data-action="dlc_check" data-appid="' + game.app_id + '" data-tooltip="Check DLCs">DLC</button>' +
                 '<button class="btn btn-sm" data-action="lure_fix" data-appid="' + game.app_id + '" data-tooltip="Patch ACF to match Steam CM latest, no download">Lure Fix</button>' +
