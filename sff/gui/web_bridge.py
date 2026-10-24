@@ -2775,13 +2775,20 @@ def _fetch_steam_platforms(app_ids):
                 # "rerelease" so the search filter can keep them.
                 type_str = ""
                 if isinstance(type_int, int):
+                    # Codes verified against GetItems: 0 Portal 2 (game),
+                    # 1 Peggle Deluxe Free Demo, 2 Portal Reloaded (mod),
+                    # 4 Cyberpunk Phantom Liberty (dlc), 6 Blender
+                    # (software), 14 Call of Duty WWII - Multiplayer
+                    # (rerelease). 2 and 6 used to be swapped here, which
+                    # had the search filter discarding every mod as DLC.
                     type_str = {
                         0: "game",
-                        2: "dlc",
+                        1: "demo",
+                        2: "mod",
                         3: "demo",
                         4: "dlc",
                         5: "advertising",
-                        6: "mod",
+                        6: "software",
                         7: "tool",
                         9: "video",
                         10: "video",

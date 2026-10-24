@@ -785,6 +785,72 @@ def _resolve_store_appid(appid):
     }
 
 
+_STORESEARCH_URL = "https://store.steampowered.com/api/storesearch/"
+
+
+def _storesearch_rows(query, limit=12):
+    """Store rows from Steam's own store search, for names the mirrors lack.
+
+    The name search scores app lists from IStoreService / GameList, both of
+    which are games only. Mods are in neither, so a query like "Portal
+    Reloaded" scores zero candidates and the Store tab comes up empty even
+    though the store page exists. Steam's store search does index them;
+    each hit is resolved through GetItems so the type and platform checks
+    downstream still see Steam's own answer. Returns [] on any failure.
+    """
+    term = str(query or "").strip()
+    if not term:
+        return []
+    try:
+        query_str = _urlparse.urlencode(
+            {"term": term, "l": "english", "cc": "us", "start": 0, "count": limit}
+        )
+        request = _req.Request(
+            _STORESEARCH_URL + "?" + query_str,
+            headers={"User-Agent": "SteaMidra/6.10.0"},
+        )
+        with _req.urlopen(request, timeout=6) as resp:
+            data = json.loads(resp.read())
+    except Exception as e:
+        logger.debug("store search for %r failed: %s", term, e)
+        return []
+
+    hits = {}
+    for item in data.get("items") or []:
+        try:
+            aid = int(item.get("id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if aid > 0 and item.get("name"):
+            hits[aid] = str(item["name"])
+    if not hits:
+        logger.debug("store search for %r returned no hits", term)
+        return []
+
+    images, types, nsfw_map = _fetch_steam_image_urls(list(hits))
+    rows = []
+    for aid, name in hits.items():
+        type_int = types.get(aid)
+        if isinstance(type_int, int) and type_int not in _APPID_LOOKUP_TYPES:
+            logger.debug(
+                "store search for %r dropped appid %s (type %s)", term, aid, type_int
+            )
+            continue
+        rows.append({
+            "app_id": aid,
+            "name": name,
+            "last_updated": "",
+            "status": "",
+            "size": 0,
+            "image_url": images.get(aid) or "",
+            "tags": [],
+            "drm": False,
+            "nsfw": bool(nsfw_map.get(aid, False)),
+        })
+    logger.debug("store search for %r resolved %d row(s)", term, len(rows))
+    return rows
+
+
 def _fetch_steam_platforms(app_ids):
     """Look up Steam metadata for each appid via batched
     ``IStoreBrowseService/GetItems/v1`` calls.
@@ -908,13 +974,20 @@ def _fetch_steam_platforms(app_ids):
 
                 type_str = ""
                 if isinstance(type_int, int):
+                    # Codes verified against GetItems: 0 Portal 2 (game),
+                    # 1 Peggle Deluxe Free Demo, 2 Portal Reloaded (mod),
+                    # 4 Cyberpunk Phantom Liberty (dlc), 6 Blender
+                    # (software), 14 Call of Duty WWII - Multiplayer
+                    # (rerelease). 2 and 6 used to be swapped here, which
+                    # had the search filter discarding every mod as DLC.
                     type_str = {
                         0: "game",
-                        2: "dlc",
+                        1: "demo",
+                        2: "mod",
                         3: "demo",
                         4: "dlc",
                         5: "advertising",
-                        6: "mod",
+                        6: "software",
                         7: "tool",
                         9: "video",
                         10: "video",
@@ -1514,6 +1587,26 @@ def _bridge_search_games(bridge, query, offset, per_page, sort_by='updated', tag
                         existing_ids.add(app_id)
                 if gj_extra:
                     logger.debug("search_games: merged %d extra games from JSON sources", len(gj_extra))
+
+        # A real text query that scored nothing: every catalog behind the
+        # name search is games only, so a mod (Portal Reloaded, 1255980)
+        # cannot match however it is typed. Steam's own store search does
+        # index those, so ask it once before the query comes back empty.
+        if query and not steam_rows and not extras and not _appid_query_value(query):
+            try:
+                _ss_rows = _storesearch_rows(query)
+            except Exception as e:
+                logger.debug("search_games: store search fallback failed: %s", e)
+                _ss_rows = []
+            if _ss_rows:
+                for g in _ss_rows:
+                    enrich_game_dict(g)
+                steam_rows.extend(_ss_rows)
+                steam_total += len(_ss_rows)
+                logger.debug(
+                    "search_games: %r fell back to store search (%d row(s))",
+                    query, len(_ss_rows),
+                )
 
         # Platform filter for ALL search result rows. Uses Steam GetItems
         # platform data (cached in _STEAM_PLATFORM_CACHE) to drop
