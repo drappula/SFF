@@ -26,6 +26,7 @@ BrandingText "${APPNAME} ${VERSION}"
 !include "MUI2.nsh"
 !include "x64.nsh"
 !include "Sections.nsh"
+!include "FileFunc.nsh"
 
 !define MUI_ABORTWARNING
 !define MUI_ICON    "SFF.ico"
@@ -41,6 +42,7 @@ BrandingText "${APPNAME} ${VERSION}"
 
 ; Installer pages
 !insertmacro MUI_PAGE_WELCOME
+!define MUI_PAGE_CUSTOMFUNCTION_LEAVE "DirectoryLeave"
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_INSTFILES
@@ -63,10 +65,41 @@ Function .onInit
 FunctionEnd
 
 ; ============================================================
+; DirectoryLeave — runs when the user clicks Next on the install
+; directory page. If the chosen folder isn't already a dedicated
+; SteaMidra dir, offer to append \SteaMidra instead of installing
+; into the shared folder. No takes them back to the picker.
+; ============================================================
+Function DirectoryLeave
+    ${GetFileName} "$INSTDIR" $0
+    StrCmp $0 "${APPNAME}" dir_leave_ok
+    ; Strip a trailing backslash so the append doesn't double up
+    StrCpy $1 "$INSTDIR" 1 -1
+    StrCmp $1 "\" 0 dir_leave_no_slash
+    StrCpy $INSTDIR "$INSTDIR" -1
+dir_leave_no_slash:
+    MessageBox MB_YESNO|MB_ICONQUESTION "SteaMidra must be installed into a dedicated folder named ${APPNAME}.$\r$\n$\r$\nInstall into this folder instead?$\r$\n$INSTDIR\${APPNAME}$\r$\n$\r$\nYes = use that folder$\r$\nNo = go back and change the location" IDYES dir_leave_append
+    Abort
+dir_leave_append:
+    StrCpy $INSTDIR "$INSTDIR\${APPNAME}"
+dir_leave_ok:
+FunctionEnd
+
+; ============================================================
 ; Main install section
 ; ============================================================
+; Refuse to install into a folder that isn't named SteaMidra.
+; The uninstaller wipes its install dir recursively, so it must
+; always be a dedicated folder — never a shared one whose other
+; contents would be taken down with it on uninstall.
 Section "SteaMidra (required)" SEC_MAIN
     SectionIn RO
+
+    ${GetFileName} "$INSTDIR" $0
+    StrCmp $0 "${APPNAME}" install_dir_ok
+    MessageBox MB_OK|MB_ICONSTOP "SteaMidra must be installed into a dedicated folder named ${APPNAME}.$\r$\n$\r$\nChosen: $INSTDIR$\r$\n$\r$\nInstall aborted — nothing was written."
+    Abort
+install_dir_ok:
 
     ; Stop a running instance first — its EXE is locked and the
     ; install would fail with "Error opening file for writing".
@@ -218,6 +251,33 @@ SectionEnd
 ; ============================================================
 ; Uninstaller
 ; ============================================================
+; un.onInit — never let the uninstaller delete a folder that isn't
+; a real, dedicated SteaMidra install. $INSTDIR used to come from
+; the registry InstallDir value (the folder typed at install time),
+; so a stale or shared folder made `RMDir /r` wipe unrelated trees.
+; Two guards:
+;   1. Pin the target to where this exe actually lives — Uninstall.exe
+;      was written into the real install dir at install time, so a
+;      stale/corrupted registry value can't redirect the wipe.
+;   2. The folder must be named "SteaMidra" AND contain the app exe.
+;      Presence of the exe alone is not enough: picking a folder that
+;      merely contains the exe next to other data still passes an exe
+;      check, then RMDir /r removes everything inside it. The name
+;      requirement proves the folder is dedicated.
+Function un.onInit
+    ; The exe's own directory IS the install dir: "$INSTDIR\Uninstall.exe"
+    ; was written there by the installer, so Uninstall.exe always sits
+    ; inside the real install folder.
+    StrCpy $INSTDIR "$EXEDIR"
+    ${GetFileName} "$INSTDIR" $0
+    StrCmp $0 "${APPNAME}" 0 un_bad
+    IfFileExists "$INSTDIR\${EXENAME}" un_ok
+un_bad:
+    MessageBox MB_OK|MB_ICONSTOP "SteaMidra install folder not found:$\r$\n$INSTDIR$\r$\n$\r$\nUninstall aborted — nothing was deleted."
+    Abort
+un_ok:
+FunctionEnd
+
 Section "Uninstall"
     ; Terminate the app before deleting files
     nsExec::ExecToLog 'taskkill /F /IM "${EXENAME}" /T'
