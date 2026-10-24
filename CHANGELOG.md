@@ -1,11 +1,17 @@
 # Changelog
 
-## Unreleased
+## 6.10.1
+
+### Added
+
+- **Download button for injected, not-downloaded games** — games SteaMidra manages via stplug-in/saved_lua but has not downloaded (no ACF yet) now show in the Library with a Download action that opens Steam's install dialog, instead of a dead Play button.
 
 ### Fixed
 
 - **Typed app ids find unlisted components** — the Store searched only its merged app list, so an app Steam hides from search (Call of Duty: WWII - Multiplayer, 476620) showed "No games found" unless the live app-list fetch had contributed it. A query that is a plain app id now resolves through `GetItems` when no catalog row matches, and the store-type filter admits mods, demos and software, so free mods like Portal Reloaded (1255980) resolve too.
+- **Zero-hit store queries fall back to Steam's store search** — the name search scores app lists that only contain games, so a mod or demo typed in the Store came up empty. A query that scores nothing now asks Steam's own store search once before reporting "no games found", which resolves Portal Reloaded (1255980) and similar titles.
 - **Updating while SteaMidra runs no longer fails** — the installer tried to overwrite `SteaMidra_GUI.exe` while it was locked, dying with "Error opening file for writing". It now kills the running app first, like the uninstaller already did.
+- **Uninstaller can't wipe unrelated folders anymore** — `RMDir /r "$INSTDIR"` trusted the registry `InstallDir` value, so an install folder that wasn't a dedicated SteaMidra directory made uninstalling recursively delete everything under it. The uninstaller now pins itself to the folder it actually lives in and refuses to run unless that folder is named `SteaMidra` and contains `SteaMidra_GUI.exe`. The installer also enforces a dedicated folder: choosing any other location asks "Install into \<chosen>\SteaMidra instead?" (No takes you back to the picker) and refuses to install anywhere that isn't named `SteaMidra`.
 
 ## 6.10.0-pre
 

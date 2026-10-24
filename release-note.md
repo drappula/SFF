@@ -1,15 +1,12 @@
-## 6.10.0-pre
+## 6.10.1
 
 ### Added
 
-* First-run interactive tutorial — new users get a 1-minute guided tour covering setup, the Store tab, download sources with key instructions, and the Downloads tab, using a fake demo game. Replay it from Settings.
-* Standalone install/uninstall scripts (`scripts/`) — one-line install from the latest release with a progress bar and `--pre` for beta builds; uninstallers prompt before deleting added games and LumaCore/SLSsteam, then sweep the app and its Steam-side entries.
+* Download button for injected, not-downloaded games — games SteaMidra manages via stplug-in/saved_lua but has not downloaded yet now show in the Library with a Download action that opens Steam's install dialog, instead of a dead Play button.
 
 ### Fixed
 
-* SLSsteam no longer installs without asking — startup now asks first instead of running headcrab mid-session.
-* DDMod downloads that fetched nothing no longer report success — empty install dirs fail with a real error instead of a false "Download complete".
-* Windows frozen auto-update works again — the missing `safe_extract_zip` import is fixed.
-* Fix Game picks the right Linux mode from the folder contents instead of depending on the caller.
-* Native downloader rejects wrong-depot manifests up front with a clear error instead of dying in AES decrypt.
-* Store search is ~3x faster — normalized names and search tokens are precomputed once at load.
+* Typed app ids find unlisted components — the Store searched only its merged app list, so an app Steam hides from search (Call of Duty: WWII - Multiplayer, 476620) showed "No games found" unless the live app-list fetch had contributed it. A query that is a plain app id now resolves through `GetItems` when no catalog row matches, and the store-type filter admits mods, demos and software.
+* Zero-hit store queries fall back to Steam's store search — the name search scores app lists that only contain games, so a mod or demo typed in the Store came up empty. A query that scores nothing now asks Steam's own store search once before reporting "no games found".
+* Updating while SteaMidra runs no longer fails — the installer now kills the running app before overwriting `SteaMidra_GUI.exe`.
+* Uninstaller can't wipe unrelated folders anymore — the uninstaller now pins itself to the folder it actually lives in and refuses to run unless that folder is named `SteaMidra` and contains `SteaMidra_GUI.exe`. The installer enforces a dedicated folder: choosing any other location asks "Install into \<chosen>\SteaMidra instead?" (No takes you back to the picker).
