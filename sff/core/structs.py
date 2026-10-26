@@ -274,7 +274,11 @@ class Settings(Enum):
         False,
         str,
     )
-    # A9: startup self-update popup (default ON, toggle in Settings page)
+    # A9: startup self-update popup. ON by default — SFFMainWindow reads this
+    # at launch and shows SelfUpdateDialog when a newer release is available.
+    # The Settings toggle can turn it off (only an explicit False persists).
+    # NOTE: the 3rd positional arg here is `is_secret` (False), not a default
+    # value — the effective default is decided by the reader (_self_update_enabled).
     AUTO_UPDATE_CHECK = SettingItem("auto_update_check", "Check for updates on startup", False, bool)
     LAST_SKIPPED_VERSION = SettingItem("last_skipped_version", "Last Skipped Update Version (managed automatically)", False, str)
     # A12: Bulk Import Queue mode. "process_immediately" starts the drain

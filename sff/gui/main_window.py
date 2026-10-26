@@ -138,6 +138,21 @@ class GameComboBox(QComboBox):
 
 
 class SFFMainWindow(QMainWindow):
+    # A9 startup self-update: carries (version, release_notes_markdown) from
+    # the background check thread back to the GUI thread.
+    self_update_ready = pyqtSignal(str, str)
+
+    @staticmethod
+    def _setting_default_on(raw):
+        # "default ON" parsing shared by close_to_tray and auto_update_check:
+        # unset/empty -> True; bool -> as-is; strings disable only on
+        # false/0/no/off (case-insensitive).
+        if raw is None or raw == "":
+            return True
+        if isinstance(raw, bool):
+            return raw
+        return str(raw).strip().lower() not in ("false", "0", "no", "off")
+
     def __init__(self, ui, steam_path):
         super().__init__()
         self.ui = ui
@@ -194,6 +209,7 @@ class SFFMainWindow(QMainWindow):
         __import__('logging').getLogger().addHandler(self._log_handler)
         self._stream_emitter.text_written.connect(self._forward_stdout_to_web)
         self._stream_emitter.text_written.connect(self._buffer_qt_log)
+        self.self_update_ready.connect(self._show_self_update_dialog)
         self._worker = None
         self._worker_thread = None
         from sff.core.strings import VERSION
@@ -918,6 +934,8 @@ class SFFMainWindow(QMainWindow):
                 "</body></html>"
             )
         self.dismiss_splash()
+        if ok:
+            self._maybe_self_update_on_startup()
 
     def _on_render_crash(self, status):
         import logging
@@ -958,6 +976,88 @@ class SFFMainWindow(QMainWindow):
         self._web_splash_effect = effect
         self._web_splash_anim = anim
         anim.start()
+
+    # ── A9 startup self-update check ────────────────────────────
+
+    def _maybe_self_update_on_startup(self):
+        """Run the self-update check once at launch when the user enabled
+        'Check for updates on startup'. The network call runs off the GUI
+        thread; SelfUpdateDialog is shown via the queued signal."""
+        if getattr(self, "_startup_update_checked", False):
+            return
+        self._startup_update_checked = True
+        if getattr(self, "_quitting", False):
+            return
+        if not self._self_update_enabled():
+            return
+        logger.debug("startup self-update check scheduled")
+        import threading
+        threading.Thread(target=self._self_update_check_thread, daemon=True).start()
+
+    def _self_update_enabled(self):
+        try:
+            from sff.core.storage.settings import get_setting
+            from sff.core.structs import Settings
+            return self._setting_default_on(get_setting(Settings.AUTO_UPDATE_CHECK))
+        except Exception:
+            return True
+
+    def _self_update_check_thread(self):
+        try:
+            from sff.updater import Updater
+            from sff.core.storage.settings import get_setting
+            from sff.core.structs import Settings
+            if getattr(self, "_quitting", False):
+                return
+            is_newer, release = Updater.update_available()
+            latest = (release or {}).get("tag_name", "") if release else ""
+            if not (is_newer and latest):
+                return
+            skipped = get_setting(Settings.LAST_SKIPPED_VERSION)
+            if skipped and str(skipped) == latest:
+                return
+            # Prefer the body already returned by update_available(); only
+            # hit the tag endpoint if it's missing.
+            notes = ""
+            if isinstance(release, dict):
+                body = release.get("body")
+                if isinstance(body, str):
+                    notes = body
+            if not notes:
+                try:
+                    notes = Updater.fetch_release_notes(latest) or ""
+                except Exception:
+                    notes = ""
+            if getattr(self, "_quitting", False):
+                return
+            self.self_update_ready.emit(latest, notes)
+        except Exception as exc:
+            logger.warning("startup self-update check failed: %s", exc)
+
+    def _show_self_update_dialog(self, version, release_notes_markdown):
+        if getattr(self, "_quitting", False):
+            return
+        try:
+            from sff.gui.dialogs.self_update_dialog import SelfUpdateDialog
+            dlg = SelfUpdateDialog(self, version, release_notes_markdown)
+            self._self_update_dlg = dlg  # keep a reference so it isn't GC'd
+            dlg.download_now.connect(
+                lambda: self._run_tool(lambda: self.ui.check_updates(self.ui.os_type))
+            )
+            dlg.skip_this_version.connect(
+                lambda: self._persist_skipped_version(version)
+            )
+            dlg.show()
+        except Exception as exc:
+            logger.warning("self-update dialog failed to show: %s", exc)
+
+    def _persist_skipped_version(self, version):
+        try:
+            from sff.core.storage.settings import set_setting
+            from sff.core.structs import Settings
+            set_setting(Settings.LAST_SKIPPED_VERSION, version)
+        except Exception as exc:
+            logger.warning("could not persist skipped version: %s", exc)
 
     def eventFilter(self, obj, event):
         if obj is getattr(self, "_web_view", None) and event.type() == QEvent.Type.Resize:
@@ -1767,12 +1867,7 @@ class SFFMainWindow(QMainWindow):
             raw = get_setting(_S.CLOSE_TO_TRAY)
         except Exception:
             raw = None
-        if raw is None or raw == "":
-            close_to_tray = True
-        elif isinstance(raw, bool):
-            close_to_tray = raw
-        else:
-            close_to_tray = str(raw).strip().lower() not in ("false", "0", "no", "off")
+        close_to_tray = self._setting_default_on(raw)
         if (
             self._tray is not None
             and self._tray.minimize_to_tray

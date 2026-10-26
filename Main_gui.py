@@ -604,89 +604,20 @@ def main():
 
         QTimer.singleShot(6000, _kick_dotnet_install)
 
-    # A9: startup self-update popup. Defer 2s so the window paints first.
-    # The whole body is wrapped so a GitHub failure or dialog construction
-    # error never crashes the GUI (preservation requirement 3.20).
+    # A9: startup self-update popup. The implementation lives in
+    # SFFMainWindow._maybe_self_update_on_startup (sff/gui/main_window.py) so
+    # there is a single code path across platforms/UI modes. Defer 2s so the
+    # window paints first; the method is guarded against duplicate runs, so
+    # the web-UI loadFinished hook (which also calls it) is harmless.
     from PyQt6.QtCore import QTimer
 
-    def _maybe_self_update():
+    def _trigger_self_update():
         try:
-            auto = get_setting(Settings.AUTO_UPDATE_CHECK)
-            # Default ON: only the explicit False / "False" disables it.
-            if auto is False or (isinstance(auto, str) and auto.lower() == "false"):
-                return
+            window._maybe_self_update_on_startup()
         except Exception:
             pass
 
-        # Network happens on a worker: these GitHub calls carry ~30s
-        # timeouts each and used to freeze the window. The dialog must be
-        # built on the GUI thread, so the worker hands results back through
-        # a signal (created here, so its affinity is the GUI thread).
-        from PyQt6.QtCore import QObject, pyqtSignal
-
-        class _SelfUpdateSignal(QObject):
-            show_update = pyqtSignal(str, str)
-
-        def _show_on_gui(new_version, notes):
-            try:
-                from sff.gui.dialogs.self_update_dialog import SelfUpdateDialog
-                dlg = SelfUpdateDialog(window, new_version, notes)
-
-                def _do_download():
-                    # Reuse the manual update flow from the Settings button.
-                    try:
-                        ui.check_updates(ui.os_type)
-                    except Exception:
-                        pass
-
-                def _do_skip():
-                    try:
-                        set_setting(Settings.LAST_SKIPPED_VERSION, new_version)
-                    except Exception:
-                        pass
-
-                dlg.download_now.connect(_do_download)
-                dlg.skip_this_version.connect(_do_skip)
-                # remind_later just dismisses; nothing to wire.
-                dlg.show()
-                # Hold references so Qt does not garbage-collect the dialog
-                # (or the signaler before a queued emit is delivered).
-                window._self_update_dialog = dlg
-            except Exception:
-                pass
-
-        _signaler = _SelfUpdateSignal()
-        _signaler.show_update.connect(_show_on_gui)
-        window._self_update_signaler = _signaler
-
-        def _bg_update_check():
-            try:
-                from sff.updater import Updater, fetch_release_notes
-                try:
-                    is_newer, release = Updater.update_available()
-                except Exception:
-                    return
-                if not is_newer or not release:
-                    return
-                new_version = (release.get("tag_name") or "").strip()
-                if not new_version:
-                    return
-                skipped = get_setting(Settings.LAST_SKIPPED_VERSION) or ""
-                if skipped == new_version:
-                    return
-                notes = fetch_release_notes(new_version)
-            except Exception:
-                return
-            _signaler.show_update.emit(new_version, notes)
-
-        import threading as _t
-        _t.Thread(
-            target=_bg_update_check,
-            name="sff-self-update-check",
-            daemon=True,
-        ).start()
-
-    QTimer.singleShot(2000, _maybe_self_update)
+    QTimer.singleShot(2000, _trigger_self_update)
 
     # Fill missing LumaCore pattern cache for the current Steam build on
     # startup (Steam client updates after install leave the cache empty).

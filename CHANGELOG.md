@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Startup "Check for updates" consolidated into one non-blocking path** — there were two overlapping startup update checks: the legacy one in `Main_gui.py` (which ran `ui.check_updates` synchronously on the GUI thread, freezing the window on download) and a newer one. They have been merged into a single path in `SFFMainWindow._maybe_self_update_on_startup`: it honors "Check for updates on startup" (enabled by default; the Settings toggle disables it), runs `Updater.update_available()` off the GUI thread, and shows `SelfUpdateDialog` when a newer release exists (respecting a skipped version), with "Download Now" routed through the worker thread instead of blocking the UI. The dialog is now triggered on all platforms/UI modes instead of only on the Windows web-UI path.
+
 ## 6.10.1
 
 ### Added
