@@ -6,6 +6,8 @@
 
 - **Startup "Check for updates" consolidated into one non-blocking path** — there were two overlapping startup update checks: the legacy one in `Main_gui.py` (which ran `ui.check_updates` synchronously on the GUI thread, freezing the window on download) and a newer one. They have been merged into a single path in `SFFMainWindow._maybe_self_update_on_startup`: it honors "Check for updates on startup" (enabled by default; the Settings toggle disables it), runs `Updater.update_available()` off the GUI thread, and shows `SelfUpdateDialog` when a newer release exists (respecting a skipped version), with "Download Now" routed through the worker thread instead of blocking the UI. The dialog is now triggered on all platforms/UI modes instead of only on the Windows web-UI path.
 
+- **Manifest watcher copes with folders that refuse change notifications** — Windows answered `ReadDirectoryChangesW` with "Access is denied" (network shares, cloud-drive filter drivers, or a `depotcache` folder Steam recreated mid-update) and the watcher retried that call every second forever, filling the log while no manifest was being preserved. It now reopens the folder handle, and after three failures logs one warning and continues with the 5-second polling watcher.
+
 ## 6.10.1
 
 ### Added

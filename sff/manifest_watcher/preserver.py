@@ -76,6 +76,10 @@ logger = logging.getLogger(__name__)
 _WATCHER_THREADS: dict[str, threading.Thread] = {}
 _WATCHER_LOCK = threading.Lock()
 
+# ReadDirectoryChangesW failures tolerated before the Windows watcher gives up
+# on notifications for that folder and polls instead.
+_WINDOWS_NOTIFY_MAX_FAILURES = 3
+
 
 # --------------------------------------------------------------------------- #
 # Helpers
@@ -219,10 +223,48 @@ def _watch_loop_polling(depotcache: Path, stop_event: threading.Event,
             pass
 
 
+def _open_directory_handle(depotcache: Path):
+    """Open a directory for change notifications (FILE_LIST_DIRECTORY)."""
+    return win32file.CreateFile(
+        str(depotcache),
+        0x0001,  # FILE_LIST_DIRECTORY
+        win32con.FILE_SHARE_READ
+        | win32con.FILE_SHARE_WRITE
+        | win32con.FILE_SHARE_DELETE,
+        None,
+        win32con.OPEN_EXISTING,
+        win32con.FILE_FLAG_BACKUP_SEMANTICS,
+        None,
+    )
+
+
+def _close_directory_handle(handle) -> None:
+    if handle is None:
+        return
+    try:
+        win32file.CloseHandle(handle)
+    except Exception as exc:
+        logger.debug("closing directory handle failed: %s", exc)
+
+
+def _poll_instead(depotcache: Path, reason: object,
+                  stop_event: threading.Event) -> None:
+    """Announce the handover once, then poll until the event is set."""
+    logger.warning(
+        "change notifications unavailable for %s: %s; falling back to polling",
+        depotcache,
+        reason,
+    )
+    _watch_loop_polling(depotcache, stop_event)
+
+
 def _watch_loop_windows(depotcache: Path, stop_event: threading.Event) -> None:
     """Windows watcher backed by ReadDirectoryChangesW (pywin32).
 
-    Falls back to polling when the package is unavailable.
+    Falls back to polling when the package is unavailable, or when the
+    filesystem refuses change notifications outright: shares, cloud-drive
+    filter drivers and recreated directories all answer with
+    ERROR_ACCESS_DENIED and would otherwise be retried forever.
     """
     if win32con is None or win32file is None:
         logger.info(
@@ -232,49 +274,66 @@ def _watch_loop_windows(depotcache: Path, stop_event: threading.Event) -> None:
         _watch_loop_polling(depotcache, stop_event)
         return
 
+    failures = 0
+    handle = None
     try:
-        handle = win32file.CreateFile(
-            str(depotcache),
-            0x0001,  # FILE_LIST_DIRECTORY
-            win32con.FILE_SHARE_READ
-            | win32con.FILE_SHARE_WRITE
-            | win32con.FILE_SHARE_DELETE,
-            None,
-            win32con.OPEN_EXISTING,
-            win32con.FILE_FLAG_BACKUP_SEMANTICS,
-            None,
-        )
-    except Exception as exc:
-        logger.warning(
-            "ReadDirectoryChangesW handle failed for %s: %s; falling back to polling",
-            depotcache,
-            exc,
-        )
-        _watch_loop_polling(depotcache, stop_event)
-        return
-
-    while not stop_event.is_set():
-        try:
-            results = win32file.ReadDirectoryChangesW(
-                handle,
-                4096,
-                False,  # not recursive
-                win32con.FILE_NOTIFY_CHANGE_FILE_NAME
-                | win32con.FILE_NOTIFY_CHANGE_LAST_WRITE,
-                None,
-                None,
-            )
-        except Exception as exc:
-            logger.debug("ReadDirectoryChangesW raised: %s", exc)
-            time.sleep(1.0)
-            continue
-        for action, filename in results:
-            # FILE_ACTION_REMOVED == 2, RENAMED_OLD_NAME == 4
-            if action in (2, 4):
+        while not stop_event.is_set():
+            if handle is None:
                 try:
-                    restore_manifest(depotcache / filename)
+                    handle = _open_directory_handle(depotcache)
                 except Exception as exc:
-                    logger.debug("watcher restore call failed: %s", exc)
+                    failures += 1
+                    logger.debug(
+                        "opening %s for change notifications failed (%d/%d): %s",
+                        depotcache,
+                        failures,
+                        _WINDOWS_NOTIFY_MAX_FAILURES,
+                        exc,
+                    )
+                    if failures >= _WINDOWS_NOTIFY_MAX_FAILURES:
+                        _poll_instead(depotcache, exc, stop_event)
+                        return
+                    stop_event.wait(1.0)
+                    continue
+            try:
+                results = win32file.ReadDirectoryChangesW(
+                    handle,
+                    4096,
+                    False,  # not recursive
+                    win32con.FILE_NOTIFY_CHANGE_FILE_NAME
+                    | win32con.FILE_NOTIFY_CHANGE_LAST_WRITE,
+                    None,
+                    None,
+                )
+            except Exception as exc:
+                # Steam recreates depotcache during some updates, which
+                # invalidates the handle we are holding. Reopen rather than
+                # keep calling into a dead one.
+                failures += 1
+                _close_directory_handle(handle)
+                handle = None
+                logger.debug(
+                    "ReadDirectoryChangesW failed for %s (%d/%d): %s",
+                    depotcache,
+                    failures,
+                    _WINDOWS_NOTIFY_MAX_FAILURES,
+                    exc,
+                )
+                if failures >= _WINDOWS_NOTIFY_MAX_FAILURES:
+                    _poll_instead(depotcache, exc, stop_event)
+                    return
+                stop_event.wait(1.0)
+                continue
+            failures = 0
+            for action, filename in results:
+                # FILE_ACTION_REMOVED == 2, RENAMED_OLD_NAME == 4
+                if action in (2, 4):
+                    try:
+                        restore_manifest(depotcache / filename)
+                    except Exception as exc:
+                        logger.debug("watcher restore call failed: %s", exc)
+    finally:
+        _close_directory_handle(handle)
 
 
 def _watch_loop_linux(depotcache: Path, stop_event: threading.Event) -> None:
